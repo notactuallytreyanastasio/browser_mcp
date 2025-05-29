@@ -1486,6 +1486,17 @@ class BrowserMCPServer {
       };
     }
     
+    // Handle FARK
+    if (siteNormalized.includes('fark')) {
+      return {
+        url: 'https://www.fark.com',
+        domain: 'www.fark.com',
+        pattern: 'fark_stories',
+        displayName: 'FARK',
+        type: 'fark'
+      };
+    }
+    
     // Handle direct URLs
     if (site.startsWith('http')) {
       const url = new URL(site);
