@@ -4,6 +4,7 @@ import { CallToolRequestSchema, ListToolsRequestSchema } from '@modelcontextprot
 import { chromium } from 'playwright';
 import { CommandProcessor } from './command-processor.js';
 import { Database } from './database.js';
+import { SessionManager } from './session-manager.js';
 
 class BrowserMCPServer {
   constructor() {
@@ -23,6 +24,7 @@ class BrowserMCPServer {
     this.page = null;
     this.database = new Database();
     this.commandProcessor = new CommandProcessor(this);
+    this.sessionManager = new SessionManager();
     this.setupToolHandlers();
     this.initDatabase();
   }
@@ -188,6 +190,22 @@ class BrowserMCPServer {
           },
         },
         {
+          name: 'get_session_stats',
+          description: 'Get session statistics and rate limiting info',
+          inputSchema: {
+            type: 'object',
+            properties: {},
+          },
+        },
+        {
+          name: 'test_browser_health',
+          description: 'Test if browser automation is working correctly',
+          inputSchema: {
+            type: 'object',
+            properties: {},
+          },
+        },
+        {
           name: 'get_top_stories_multi',
           description: 'Get top stories from multiple sites and subreddits in one command. Example: "Get the top 10 stories from /r/television /r/news and hacker news"',
           inputSchema: {
@@ -210,9 +228,115 @@ class BrowserMCPServer {
                 enum: ['markdown', 'json', 'plain'],
                 description: 'Output format (default: markdown)',
                 default: 'markdown'
+              },
+              save_links: {
+                type: 'boolean',
+                description: 'Whether to save extracted links to database (default: true)',
+                default: true
               }
             },
             required: ['sites']
+          },
+        },
+        {
+          name: 'query_links',
+          description: 'Query saved links with filters and search',
+          inputSchema: {
+            type: 'object',
+            properties: {
+              limit: {
+                type: 'number',
+                description: 'Number of links to return (default: 50)',
+                default: 50
+              },
+              is_curated: {
+                type: 'boolean',
+                description: 'Filter by curated status'
+              },
+              is_public: {
+                type: 'boolean',
+                description: 'Filter by public status'
+              },
+              source_site: {
+                type: 'string',
+                description: 'Filter by source site (e.g., "reddit.com")'
+              },
+              search_text: {
+                type: 'string',
+                description: 'Search in title, description, and notes'
+              },
+              min_score: {
+                type: 'number',
+                description: 'Minimum score (1-5)'
+              },
+              tags: {
+                type: 'array',
+                items: { type: 'string' },
+                description: 'Filter by tags'
+              }
+            }
+          },
+        },
+        {
+          name: 'curate_link',
+          description: 'Mark a link as curated and optionally add metadata',
+          inputSchema: {
+            type: 'object',
+            properties: {
+              link_id: {
+                type: 'number',
+                description: 'ID of the link to curate'
+              },
+              score: {
+                type: 'number',
+                description: 'Rating 1-5 (optional)'
+              },
+              tags: {
+                type: 'array',
+                items: { type: 'string' },
+                description: 'Tags for categorization (optional)'
+              },
+              notes: {
+                type: 'string',
+                description: 'Personal notes about the link (optional)'
+              },
+              is_public: {
+                type: 'boolean',
+                description: 'Make link public for sharing (optional)'
+              },
+              description: {
+                type: 'string',
+                description: 'Custom description (optional)'
+              }
+            },
+            required: ['link_id']
+          },
+        },
+        {
+          name: 'execute_sql',
+          description: 'Execute a SELECT SQL query on the database',
+          inputSchema: {
+            type: 'object',
+            properties: {
+              query: {
+                type: 'string',
+                description: 'SQL SELECT query to execute'
+              },
+              params: {
+                type: 'array',
+                items: { type: 'string' },
+                description: 'Parameters for prepared statement (optional)'
+              }
+            },
+            required: ['query']
+          },
+        },
+        {
+          name: 'get_database_schema',
+          description: 'Get the database schema and table structure',
+          inputSchema: {
+            type: 'object',
+            properties: {}
           },
         },
       ],
@@ -266,7 +390,25 @@ class BrowserMCPServer {
             return await this.listAllPatterns();
           
           case 'get_top_stories_multi':
-            return await this.getTopStoriesMulti(args.sites, args.count || 10, args.format || 'markdown');
+            return await this.getTopStoriesMulti(args.sites, args.count || 10, args.format || 'markdown', args.save_links !== false);
+          
+          case 'query_links':
+            return await this.queryLinks(args);
+          
+          case 'curate_link':
+            return await this.curateLink(args);
+          
+          case 'execute_sql':
+            return await this.executeSql(args.query, args.params || []);
+          
+          case 'get_database_schema':
+            return await this.getDatabaseSchema();
+          
+          case 'get_session_stats':
+            return await this.getSessionStats();
+          
+          case 'test_browser_health':
+            return await this.testBrowserHealth();
           
           default:
             throw new Error(`Unknown tool: ${name}`);
@@ -296,23 +438,63 @@ class BrowserMCPServer {
       };
     }
 
-    this.browser = await chromium.launch({ 
-      headless: true, 
-      slowMo: 100 // Add slight delay for visibility
-    });
-    this.page = await this.browser.newPage();
-    
-    // Set user agent to appear like a regular browser
-    await this.page.setUserAgent('Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
-    
-    return {
-      content: [
-        {
-          type: 'text',
-          text: 'Browser opened successfully',
-        },
-      ],
-    };
+    try {
+      console.error('Starting browser launch...');
+      
+      this.browser = await chromium.launch({ 
+        headless: true, 
+        slowMo: 200, // Slower for more human-like behavior
+        args: [
+          '--no-first-run',
+          '--no-default-browser-check',
+          '--disable-blink-features=AutomationControlled',
+          '--disable-web-security',
+          '--disable-features=VizDisplayCompositor'
+        ]
+      });
+      
+      console.error('Browser launched, creating context...');
+      
+      const context = await this.browser.newContext({
+        viewport: { width: 1920, height: 1080 },
+        userAgent: this.sessionManager.getRandomUserAgent()
+      });
+      
+      console.error('Context created, opening page...');
+      
+      this.page = await context.newPage();
+      
+      console.error('Page opened, setting up detection prevention...');
+      
+      // Set up detection prevention
+      await this.sessionManager.handleDetectionPrevention(this.page);
+      
+      console.error('Browser setup complete');
+      
+      return {
+        content: [
+          {
+            type: 'text',
+            text: 'Browser opened successfully with session management',
+          },
+        ],
+      };
+    } catch (error) {
+      console.error('Browser launch failed:', error);
+      
+      // Cleanup on failure
+      if (this.browser) {
+        try {
+          await this.browser.close();
+        } catch (e) {
+          console.error('Failed to close browser after error:', e);
+        }
+        this.browser = null;
+        this.page = null;
+      }
+      
+      throw new Error(`Failed to launch browser: ${error.message}`);
+    }
   }
 
   async navigateTo(url) {
@@ -325,13 +507,28 @@ class BrowserMCPServer {
       url = 'https://' + url;
     }
 
-    await this.page.goto(url);
+    const domain = new URL(url).hostname;
+    
+    // Set up session for this domain
+    await this.sessionManager.setupPageForDomain(this.page, domain);
+    
+    // Respect rate limits
+    await this.sessionManager.respectRateLimit(domain);
+    
+    // Navigate with timeout and proper waiting
+    await this.page.goto(url, { 
+      waitUntil: 'networkidle',
+      timeout: 30000 
+    });
+    
+    // Save session after successful navigation
+    await this.sessionManager.savePageSession(this.page, domain);
     
     return {
       content: [
         {
           type: 'text',
-          text: `Navigated to ${url}`,
+          text: `Navigated to ${url} with session management`,
         },
       ],
     };
@@ -1158,7 +1355,22 @@ class BrowserMCPServer {
       await this.openBrowser();
     }
     
-    await this.page.goto(siteInfo.url, { waitUntil: 'networkidle' });
+    const domain = new URL(siteInfo.url).hostname;
+    
+    // Set up session for this domain
+    await this.sessionManager.setupPageForDomain(this.page, domain);
+    
+    // Respect rate limits
+    await this.sessionManager.respectRateLimit(domain, 2000, 5000);
+    
+    // Navigate with proper session handling
+    await this.page.goto(siteInfo.url, { 
+      waitUntil: 'networkidle',
+      timeout: 30000 
+    });
+    
+    // Save session after navigation
+    await this.sessionManager.savePageSession(this.page, domain);
     
     // Try to find and apply appropriate pattern
     let patternName = siteInfo.pattern;
@@ -1263,6 +1475,84 @@ class BrowserMCPServer {
     }
     
     return output;
+  }
+
+  async getSessionStats() {
+    const stats = this.sessionManager.getSessionStats();
+    
+    let output = `# Session Statistics\n\n`;
+    
+    if (Object.keys(stats).length === 0) {
+      output += 'No sessions active yet.\n';
+    } else {
+      for (const [domain, data] of Object.entries(stats)) {
+        output += `## ${domain}\n`;
+        output += `- **Requests**: ${data.requestCount}\n`;
+        output += `- **Last Request**: ${data.lastRequest ? new Date(data.lastRequest).toLocaleString() : 'Never'}\n`;
+        output += `- **Has Session**: ${data.hasSession ? 'Yes' : 'No'}\n\n`;
+      }
+    }
+    
+    return {
+      content: [
+        {
+          type: 'text',
+          text: output,
+        },
+      ],
+    };
+  }
+
+  async testBrowserHealth() {
+    let output = `# Browser Health Check\n\n`;
+    
+    try {
+      // Test 1: Check if browser can be opened
+      output += `## Test 1: Browser Launch\n`;
+      if (this.browser) {
+        output += `✅ Browser already open\n\n`;
+      } else {
+        output += `🔄 Attempting to launch browser...\n`;
+        await this.openBrowser();
+        output += `✅ Browser launched successfully\n\n`;
+      }
+      
+      // Test 2: Check if we can navigate to a simple site
+      output += `## Test 2: Basic Navigation\n`;
+      output += `🔄 Testing navigation to example.com...\n`;
+      await this.page.goto('https://example.com', { timeout: 15000 });
+      output += `✅ Navigation successful\n\n`;
+      
+      // Test 3: Check if we can extract content
+      output += `## Test 3: Content Extraction\n`;
+      const title = await this.page.title();
+      output += `✅ Page title extracted: "${title}"\n\n`;
+      
+      // Test 4: Session management
+      output += `## Test 4: Session Management\n`;
+      await this.sessionManager.setupPageForDomain(this.page, 'example.com');
+      output += `✅ Session management working\n\n`;
+      
+      output += `## Overall Status: ✅ All systems operational\n`;
+      
+    } catch (error) {
+      output += `## ❌ Error: ${error.message}\n\n`;
+      output += `**Troubleshooting:**\n`;
+      output += `- Check if Playwright browsers are installed: \`npx playwright install\`\n`;
+      output += `- Check if the server has proper permissions\n`;
+      output += `- Try restarting Claude Desktop\n`;
+      
+      console.error('Browser health check failed:', error);
+    }
+    
+    return {
+      content: [
+        {
+          type: 'text',
+          text: output,
+        },
+      ],
+    };
   }
 
   async run() {
