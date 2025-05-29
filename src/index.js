@@ -1289,6 +1289,8 @@ class BrowserMCPServer {
         
         if (domain === 'news.ycombinator.com') {
           shouldSave = this.isHackerNewsStory(item.text, item.href);
+        } else if (domain === 'old.reddit.com') {
+          shouldSave = this.isRedditStory(item.text, item.href);
         } else if (item.href && item.text.length > 10) {
           // For other sites, use basic filtering
           shouldSave = true;
@@ -1467,8 +1469,8 @@ class BrowserMCPServer {
     if (siteNormalized.startsWith('/r/') || siteNormalized.startsWith('r/')) {
       const subreddit = siteNormalized.replace(/^\/?(r\/)?/, '');
       return {
-        url: `https://reddit.com/r/${subreddit}`,
-        domain: 'www.reddit.com',
+        url: `https://old.reddit.com/r/${subreddit}`,
+        domain: 'old.reddit.com',
         pattern: 'reddit_stories',
         displayName: `/r/${subreddit}`,
         type: 'reddit'
@@ -1586,24 +1588,20 @@ class BrowserMCPServer {
             const href = await el.getAttribute('href');
             
             if (text && text.trim()) {
-              // Filter out non-story elements for Hacker News
+              // Apply site-specific filtering
+              let shouldInclude = false;
+              
               if (siteInfo.type === 'hackernews') {
-                // Skip navigation, user links, and other non-story elements
-                if (this.isHackerNewsStory(text.trim(), href)) {
-                  // Make relative URLs absolute
-                  let fullUrl = href;
-                  if (href && !href.startsWith('http')) {
-                    fullUrl = new URL(href, siteInfo.url).toString();
-                  }
-                  
-                  stories.push({
-                    title: text.trim(),
-                    url: fullUrl,
-                    selector: selector
-                  });
-                }
+                shouldInclude = this.isHackerNewsStory(text.trim(), href);
+              } else if (siteInfo.type === 'reddit') {
+                shouldInclude = this.isRedditStory(text.trim(), href);
               } else {
-                // For other sites, use original logic
+                // For other sites, include everything with basic filtering
+                shouldInclude = text.trim().length > 5;
+              }
+              
+              if (shouldInclude) {
+                // Make relative URLs absolute
                 let fullUrl = href;
                 if (href && !href.startsWith('http')) {
                   fullUrl = new URL(href, siteInfo.url).toString();
@@ -2103,6 +2101,62 @@ class BrowserMCPServer {
     
     // If it doesn't start with common navigation patterns and has reasonable length
     if (text.length > 15 && !text.match(/^\d+\s*(hours?|minutes?|days?)\s*ago$/)) {
+      return true;
+    }
+    
+    return false;
+  }
+
+  isRedditStory(text, href) {
+    // Filter out Reddit navigation and non-story elements
+    const navigationItems = [
+      'reddit', 'hot', 'new', 'rising', 'top', 'controversial', 'gilded',
+      'wiki', 'promoted', 'submit', 'preferences', 'logout', 'login',
+      'front', 'all', 'random', 'friends', 'mod', 'message'
+    ];
+    
+    // Skip navigation items
+    if (navigationItems.some(nav => text.toLowerCase() === nav)) {
+      return false;
+    }
+    
+    // Skip if it's a user link (/u/ or /user/)
+    if (href && (href.includes('/u/') || href.includes('/user/'))) {
+      return false;
+    }
+    
+    // Skip if it's a subreddit link without being a post
+    if (href && href.includes('/r/') && !href.includes('/comments/')) {
+      return false;
+    }
+    
+    // Skip comment counts or vote indicators
+    if (text.match(/^\d+\s*(comment|point|vote)s?$/i)) {
+      return false;
+    }
+    
+    // Skip time indicators
+    if (text.match(/^\d+\s*(hour|minute|day|week|month|year)s?\s*ago$/i)) {
+      return false;
+    }
+    
+    // Skip very short titles (likely not real stories)
+    if (text.length < 10) {
+      return false;
+    }
+    
+    // Skip reddit interface elements
+    const interfaceElements = [
+      'permalink', 'source', 'embed', 'save', 'parent', 'reply', 'give gold',
+      'report', 'hide', 'sorted by', 'view discussions'
+    ];
+    
+    if (interfaceElements.some(element => text.toLowerCase().includes(element))) {
+      return false;
+    }
+    
+    // If it has a Reddit post URL or is a reasonable length title, it's likely a story
+    if ((href && href.includes('/comments/')) || text.length > 15) {
       return true;
     }
     

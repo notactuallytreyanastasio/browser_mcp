@@ -181,17 +181,25 @@ class SQLQueryMCPServer {
   generateSQLFromQuestion(question, schema, stats) {
     const q = question.toLowerCase();
     
-    // Time-based queries
+    // Time-based queries using saved_at (immutable save time)
     if (q.includes('today') || q.includes('recent')) {
-      return "SELECT title, url, source_site, extracted_at FROM links WHERE DATE(extracted_at) = DATE('now') ORDER BY extracted_at DESC LIMIT 20;";
+      return "SELECT title, url, source_site, saved_at FROM links WHERE DATE(saved_at) = DATE('now') ORDER BY saved_at DESC LIMIT 20;";
     }
     
     if (q.includes('this week') || q.includes('week')) {
-      return "SELECT title, url, source_site, extracted_at FROM links WHERE extracted_at >= datetime('now', '-7 days') ORDER BY extracted_at DESC;";
+      return "SELECT title, url, source_site, saved_at FROM links WHERE saved_at >= datetime('now', '-7 days') ORDER BY saved_at DESC;";
     }
     
     if (q.includes('last month') || q.includes('month')) {
-      return "SELECT title, url, source_site, score, extracted_at FROM links WHERE extracted_at >= datetime('now', '-30 days') ORDER BY extracted_at DESC;";
+      return "SELECT title, url, source_site, score, saved_at FROM links WHERE saved_at >= datetime('now', '-30 days') ORDER BY saved_at DESC;";
+    }
+    
+    if (q.includes('yesterday')) {
+      return "SELECT title, url, source_site, saved_at FROM links WHERE DATE(saved_at) = DATE('now', '-1 day') ORDER BY saved_at DESC;";
+    }
+    
+    if (q.includes('last 3 days') || q.includes('past 3 days')) {
+      return "SELECT title, url, source_site, saved_at FROM links WHERE saved_at >= datetime('now', '-3 days') ORDER BY saved_at DESC;";
     }
     
     // Rating/quality queries
@@ -222,15 +230,15 @@ class SQLQueryMCPServer {
     
     // Source-based queries
     if (q.includes('hacker news') || q.includes('hn')) {
-      return "SELECT title, url, score, extracted_at FROM links WHERE source_site = 'news.ycombinator.com' ORDER BY extracted_at DESC;";
+      return "SELECT title, url, score, saved_at FROM links WHERE source_site = 'news.ycombinator.com' ORDER BY saved_at DESC;";
     }
     
     if (q.includes('reddit')) {
-      return "SELECT title, url, source_page, extracted_at FROM links WHERE source_site LIKE '%reddit%' ORDER BY extracted_at DESC;";
+      return "SELECT title, url, source_page, saved_at FROM links WHERE (source_site LIKE '%reddit%' OR source_site = 'old.reddit.com') ORDER BY saved_at DESC;";
     }
     
     if (q.includes('fark')) {
-      return "SELECT title, url, extracted_at FROM links WHERE source_site = 'www.fark.com' ORDER BY extracted_at DESC;";
+      return "SELECT title, url, saved_at FROM links WHERE source_site = 'www.fark.com' ORDER BY saved_at DESC;";
     }
     
     // Stats queries
@@ -250,7 +258,7 @@ class SQLQueryMCPServer {
     }
     
     // Default: recent links
-    return "SELECT title, url, source_site, extracted_at FROM links ORDER BY extracted_at DESC LIMIT 20;";
+    return "SELECT title, url, source_site, saved_at FROM links ORDER BY saved_at DESC LIMIT 20;";
   }
 
   generateInsights(results, question) {
@@ -289,7 +297,7 @@ class SQLQueryMCPServer {
 
   async getDatabaseSummary() {
     const stats = await this.getStats();
-    const recentLinks = await this.executeSql("SELECT source_site, COUNT(*) as count FROM links WHERE extracted_at >= datetime('now', '-7 days') GROUP BY source_site ORDER BY count DESC LIMIT 5");
+    const recentLinks = await this.executeSql("SELECT source_site, COUNT(*) as count FROM links WHERE saved_at >= datetime('now', '-7 days') GROUP BY source_site ORDER BY count DESC LIMIT 5");
     const topRated = await this.executeSql("SELECT title, score, source_site FROM links WHERE score > 0 ORDER BY score DESC LIMIT 3");
     
     let output = `# 📊 Database Summary\n\n`;
