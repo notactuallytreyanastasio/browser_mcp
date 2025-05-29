@@ -6,6 +6,25 @@ export class CommandProcessor {
   async processCommand(command) {
     const normalizedCommand = command.toLowerCase().trim();
     
+    // Parse multi-site story extraction: "get the top 10 stories from /r/television /r/news and hacker news"
+    const multiStoriesMatch = normalizedCommand.match(/get (?:the )?top (\d+) stories? from (.+)/);
+    if (multiStoriesMatch) {
+      const count = parseInt(multiStoriesMatch[1]);
+      const sitesText = multiStoriesMatch[2];
+      const sites = this.parseSitesList(sitesText);
+      
+      return await this.browserServer.getTopStoriesMulti(sites, count, 'markdown');
+    }
+
+    // Parse simpler multi-site: "top stories from /r/television and hacker news" 
+    const simpleMultiMatch = normalizedCommand.match(/top stories? from (.+)/);
+    if (simpleMultiMatch) {
+      const sitesText = simpleMultiMatch[1];
+      const sites = this.parseSitesList(sitesText);
+      
+      return await this.browserServer.getTopStoriesMulti(sites, 10, 'markdown');
+    }
+    
     // Parse "open [site] and tell me the top [number] stories"
     const redditTopStoriesMatch = normalizedCommand.match(/open reddit and tell me the top (\w+) stories?/);
     if (redditTopStoriesMatch) {
@@ -36,6 +55,35 @@ export class CommandProcessor {
 
     // Default fallback
     throw new Error(`Command not recognized: ${command}`);
+  }
+
+  parseSitesList(sitesText) {
+    // Handle various formats:
+    // "/r/television /r/news and hacker news"
+    // "/r/television, /r/news, and hacker news"
+    // "reddit.com and news.ycombinator.com"
+    
+    const sites = [];
+    
+    // Split by common delimiters and clean up
+    const parts = sitesText
+      .split(/,|\sand\s|\s&\s/)
+      .map(part => part.trim())
+      .filter(part => part.length > 0);
+    
+    for (const part of parts) {
+      // Handle space-separated sites in a single part (like "/r/television /r/news")
+      const spaceSeparated = part.split(/\s+/)
+        .filter(item => item.startsWith('/r/') || item.includes('.com') || item.includes('hacker'));
+      
+      if (spaceSeparated.length > 1) {
+        sites.push(...spaceSeparated);
+      } else {
+        sites.push(part);
+      }
+    }
+    
+    return sites;
   }
 
   wordToNumber(word) {

@@ -52,6 +52,14 @@ A Model Context Protocol (MCP) server that enables natural language browser auto
 
 Use the `process_command` tool with natural language:
 
+**Multi-Site Story Extraction:**
+```
+"Get the top 10 stories from /r/television /r/aitah /r/news and hacker news"
+"Top stories from /r/programming and hacker news"
+"Get the top 5 stories from /r/worldnews and news.ycombinator.com"
+```
+
+**Single Site Commands:**
 ```
 "open reddit and tell me the top three stories"
 "open google"
@@ -73,6 +81,11 @@ The server provides these tools for direct control:
 - **`close_browser`** - Close the browser instance
 - **`process_command`** - Process natural language commands
   - Parameters: `command` (string)
+- **`get_top_stories_multi`** - Get stories from multiple sites in one call
+  - Parameters: `sites` (array), `count` (number), `format` (string)
+- **`apply_saved_pattern`** - Apply a saved pattern to current page
+  - Parameters: `pattern_name` (string)
+- **`list_all_patterns`** - List all saved patterns across domains
 
 ### Examples
 

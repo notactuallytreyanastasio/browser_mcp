@@ -165,6 +165,56 @@ class BrowserMCPServer {
             properties: {},
           },
         },
+        {
+          name: 'apply_saved_pattern',
+          description: 'Apply a previously saved pattern to extract data from the current page',
+          inputSchema: {
+            type: 'object',
+            properties: {
+              pattern_name: {
+                type: 'string',
+                description: 'Name of the saved pattern to apply',
+              },
+            },
+            required: ['pattern_name'],
+          },
+        },
+        {
+          name: 'list_all_patterns',
+          description: 'List all saved patterns across all domains',
+          inputSchema: {
+            type: 'object',
+            properties: {},
+          },
+        },
+        {
+          name: 'get_top_stories_multi',
+          description: 'Get top stories from multiple sites and subreddits in one command. Example: "Get the top 10 stories from /r/television /r/news and hacker news"',
+          inputSchema: {
+            type: 'object',
+            properties: {
+              sites: {
+                type: 'array',
+                items: {
+                  type: 'string'
+                },
+                description: 'Array of sites/subreddits like ["/r/television", "/r/news", "hacker news", "news.ycombinator.com"]'
+              },
+              count: {
+                type: 'number',
+                description: 'Number of stories to get from each site (default: 10)',
+                default: 10
+              },
+              format: {
+                type: 'string',
+                enum: ['markdown', 'json', 'plain'],
+                description: 'Output format (default: markdown)',
+                default: 'markdown'
+              }
+            },
+            required: ['sites']
+          },
+        },
       ],
     }));
 
@@ -208,6 +258,15 @@ class BrowserMCPServer {
           
           case 'clear_learning_mode':
             return await this.clearLearningMode();
+          
+          case 'apply_saved_pattern':
+            return await this.applySavedPattern(args.pattern_name);
+          
+          case 'list_all_patterns':
+            return await this.listAllPatterns();
+          
+          case 'get_top_stories_multi':
+            return await this.getTopStoriesMulti(args.sites, args.count || 10, args.format || 'markdown');
           
           default:
             throw new Error(`Unknown tool: ${name}`);
@@ -701,7 +760,8 @@ class BrowserMCPServer {
       sampleData: clickedElements
     };
 
-    await this.database.savePattern(domain, pattern);
+    const patternId = await this.database.savePattern(domain, pattern);
+    console.error(`Pattern "${patternName}" saved to database with ID: ${patternId}`);
 
     // Extract current data using learned selectors
     const extractedData = [];
@@ -871,6 +931,338 @@ class BrowserMCPServer {
         },
       ],
     };
+  }
+
+  async applySavedPattern(patternName) {
+    if (!this.page) {
+      throw new Error('No browser page open.');
+    }
+
+    const currentUrl = this.page.url();
+    const domain = new URL(currentUrl).hostname;
+    
+    // Get all patterns for this domain
+    const patterns = await this.database.getPatterns(domain);
+    const pattern = patterns.find(p => p.pattern_name === patternName);
+    
+    if (!pattern) {
+      return {
+        content: [
+          {
+            type: 'text',
+            text: `Pattern "${patternName}" not found for domain ${domain}. Available patterns: ${patterns.map(p => p.pattern_name).join(', ') || 'none'}`,
+          },
+        ],
+      };
+    }
+
+    console.error(`Applying pattern "${patternName}" with ${pattern.selectors.length} selectors`);
+
+    // Extract data using saved selectors
+    const extractedData = [];
+    const workingSelectors = [];
+    
+    for (const selector of pattern.selectors) {
+      try {
+        const elements = await this.page.$$(selector);
+        console.error(`Selector "${selector}" found ${elements.length} elements`);
+        
+        if (elements.length > 0) {
+          workingSelectors.push(selector);
+          for (const el of elements) {
+            const text = await el.textContent();
+            const href = await el.getAttribute('href');
+            const tagName = await el.evaluate(node => node.tagName.toLowerCase());
+            
+            if (text && text.trim()) {
+              extractedData.push({
+                selector,
+                text: text.trim(),
+                href: href,
+                tagName: tagName
+              });
+            }
+          }
+          break; // Use first working selector to avoid duplicates
+        }
+      } catch (error) {
+        console.error(`Error with selector "${selector}":`, error.message);
+        continue; // Try next selector
+      }
+    }
+
+    // Increment success count for this pattern
+    if (extractedData.length > 0) {
+      await this.database.incrementPatternSuccess(pattern.id);
+    }
+
+    return {
+      content: [
+        {
+          type: 'text',
+          text: `Applied pattern "${patternName}" on ${domain}:\n\n` +
+                `Working selectors: ${workingSelectors.join(', ')}\n` +
+                `Extracted ${extractedData.length} elements:\n\n` +
+                extractedData.map((item, i) => 
+                  `${i + 1}. ${item.text}${item.href ? ` (${item.href})` : ''}`
+                ).join('\n') +
+                (extractedData.length === 0 ? '\nNo elements found. The page structure may have changed.' : ''),
+        },
+      ],
+    };
+  }
+
+  async listAllPatterns() {
+    // Get all patterns from database
+    const allPatterns = await new Promise((resolve, reject) => {
+      this.database.db.all(
+        `SELECT p.*, s.domain, s.name as site_name 
+         FROM patterns p 
+         JOIN sites s ON p.site_id = s.id 
+         ORDER BY s.domain, p.success_count DESC, p.updated_at DESC`,
+        [],
+        (err, rows) => {
+          if (err) {
+            reject(err);
+          } else {
+            resolve(rows);
+          }
+        }
+      );
+    });
+
+    if (allPatterns.length === 0) {
+      return {
+        content: [
+          {
+            type: 'text',
+            text: 'No saved patterns found. Create some patterns using the learning mode first.',
+          },
+        ],
+      };
+    }
+
+    // Group by domain
+    const patternsByDomain = {};
+    allPatterns.forEach(pattern => {
+      if (!patternsByDomain[pattern.domain]) {
+        patternsByDomain[pattern.domain] = [];
+      }
+      patternsByDomain[pattern.domain].push(pattern);
+    });
+
+    let output = `All Saved Patterns (${allPatterns.length} total):\n\n`;
+    
+    for (const [domain, patterns] of Object.entries(patternsByDomain)) {
+      output += `📍 ${domain}:\n`;
+      patterns.forEach((pattern, i) => {
+        output += `  ${i + 1}. ${pattern.pattern_name} - ${pattern.description}\n`;
+        output += `     Success count: ${pattern.success_count}, Created: ${pattern.created_at}\n`;
+      });
+      output += '\n';
+    }
+
+    return {
+      content: [
+        {
+          type: 'text',
+          text: output,
+        },
+      ],
+    };
+  }
+
+  async getTopStoriesMulti(sites, count = 10, format = 'markdown') {
+    console.error(`Getting top ${count} stories from sites: ${sites.join(', ')}`);
+    
+    const allStories = [];
+    const errors = [];
+    
+    for (const site of sites) {
+      try {
+        console.error(`Processing site: ${site}`);
+        
+        // Normalize site input
+        const siteInfo = this.normalizeSiteInput(site);
+        const stories = await this.extractStoriesFromSite(siteInfo, count);
+        
+        allStories.push({
+          site: siteInfo.displayName,
+          url: siteInfo.url,
+          stories: stories.slice(0, count)
+        });
+        
+      } catch (error) {
+        console.error(`Error extracting from ${site}:`, error.message);
+        errors.push({ site, error: error.message });
+      }
+    }
+
+    // Format output
+    return {
+      content: [
+        {
+          type: 'text',
+          text: this.formatMultiSiteOutput(allStories, errors, format),
+        },
+      ],
+    };
+  }
+
+  normalizeSiteInput(site) {
+    const siteNormalized = site.toLowerCase().trim();
+    
+    // Handle Reddit subreddits
+    if (siteNormalized.startsWith('/r/') || siteNormalized.startsWith('r/')) {
+      const subreddit = siteNormalized.replace(/^\/?(r\/)?/, '');
+      return {
+        url: `https://reddit.com/r/${subreddit}`,
+        domain: 'www.reddit.com',
+        pattern: 'reddit_stories',
+        displayName: `/r/${subreddit}`,
+        type: 'reddit'
+      };
+    }
+    
+    // Handle Hacker News
+    if (siteNormalized.includes('hacker') || siteNormalized.includes('news.ycombinator')) {
+      return {
+        url: 'https://news.ycombinator.com',
+        domain: 'news.ycombinator.com',
+        pattern: 'hacker_news_stories',
+        displayName: 'Hacker News',
+        type: 'hackernews'
+      };
+    }
+    
+    // Handle direct URLs
+    if (site.startsWith('http')) {
+      const url = new URL(site);
+      return {
+        url: site,
+        domain: url.hostname,
+        pattern: null, // Will try to find pattern
+        displayName: url.hostname,
+        type: 'custom'
+      };
+    }
+    
+    throw new Error(`Unknown site format: ${site}. Use /r/subreddit, hacker news, or full URLs.`);
+  }
+
+  async extractStoriesFromSite(siteInfo, count) {
+    console.error(`Extracting from ${siteInfo.displayName} at ${siteInfo.url}`);
+    
+    // Navigate to the site
+    if (!this.browser) {
+      await this.openBrowser();
+    }
+    
+    await this.page.goto(siteInfo.url, { waitUntil: 'networkidle' });
+    
+    // Try to find and apply appropriate pattern
+    let patternName = siteInfo.pattern;
+    if (!patternName) {
+      // Auto-detect pattern for this domain
+      const patterns = await this.database.getPatterns(siteInfo.domain);
+      if (patterns.length > 0) {
+        patternName = patterns[0].pattern_name; // Use most successful pattern
+        console.error(`Auto-detected pattern: ${patternName}`);
+      }
+    }
+    
+    if (!patternName) {
+      throw new Error(`No saved pattern found for ${siteInfo.domain}. Please create a pattern first using learning mode.`);
+    }
+    
+    // Apply the pattern
+    const patterns = await this.database.getPatterns(siteInfo.domain);
+    const pattern = patterns.find(p => p.pattern_name === patternName);
+    
+    if (!pattern) {
+      throw new Error(`Pattern "${patternName}" not found for ${siteInfo.domain}`);
+    }
+    
+    // Extract using selectors
+    const stories = [];
+    for (const selector of pattern.selectors) {
+      try {
+        const elements = await this.page.$$(selector);
+        if (elements.length > 0) {
+          for (const el of elements) {
+            const text = await el.textContent();
+            const href = await el.getAttribute('href');
+            
+            if (text && text.trim()) {
+              // Make relative URLs absolute
+              let fullUrl = href;
+              if (href && !href.startsWith('http')) {
+                fullUrl = new URL(href, siteInfo.url).toString();
+              }
+              
+              stories.push({
+                title: text.trim(),
+                url: fullUrl,
+                selector: selector
+              });
+            }
+          }
+          break; // Use first working selector
+        }
+      } catch (error) {
+        continue;
+      }
+    }
+    
+    // Remove duplicates and limit count
+    const uniqueStories = stories.filter((story, index, self) => 
+      index === self.findIndex(s => s.title === story.title)
+    );
+    
+    console.error(`Extracted ${uniqueStories.length} stories from ${siteInfo.displayName}`);
+    return uniqueStories.slice(0, count);
+  }
+
+  formatMultiSiteOutput(allStories, errors, format) {
+    let output = '';
+    
+    if (format === 'markdown') {
+      output += `# Top Stories Feed\n\n`;
+      
+      allStories.forEach(siteData => {
+        output += `## ${siteData.site}\n\n`;
+        siteData.stories.forEach((story, i) => {
+          if (story.url) {
+            output += `${i + 1}. [${story.title}](${story.url})\n`;
+          } else {
+            output += `${i + 1}. ${story.title}\n`;
+          }
+        });
+        output += '\n';
+      });
+      
+      if (errors.length > 0) {
+        output += `## Errors\n\n`;
+        errors.forEach(error => {
+          output += `- **${error.site}**: ${error.error}\n`;
+        });
+      }
+      
+    } else if (format === 'json') {
+      output = JSON.stringify({ sites: allStories, errors }, null, 2);
+    } else {
+      // Plain format
+      allStories.forEach(siteData => {
+        output += `=== ${siteData.site} ===\n`;
+        siteData.stories.forEach((story, i) => {
+          output += `${i + 1}. ${story.title}\n`;
+          if (story.url) output += `   ${story.url}\n`;
+        });
+        output += '\n';
+      });
+    }
+    
+    return output;
   }
 
   async run() {

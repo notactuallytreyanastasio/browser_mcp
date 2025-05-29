@@ -1,0 +1,15 @@
+{
+  "database": {
+    "path": "/Users/robertgrayson/playground/luke_fun/browser_patterns.db",
+    "description": "SQLite database file to store learned browser patterns"
+  },
+  "browser": {
+    "headless": false,
+    "slowMo": 200,
+    "userAgent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+  },
+  "learning": {
+    "maxPatterns": 100,
+    "autoBackup": true
+  }
+}

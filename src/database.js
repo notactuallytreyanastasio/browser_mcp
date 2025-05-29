@@ -10,14 +10,21 @@ export class Database {
     this.db = null;
   }
 
-  async init() {
+  async init(customPath = null) {
     return new Promise((resolve, reject) => {
-      const dbPath = join(__dirname, '..', 'browser_patterns.db');
+      const dbPath = customPath || join(__dirname, '..', 'browser_patterns.db');
+      console.error(`Initializing database at: ${dbPath}`);
+      
       this.db = new sqlite3.Database(dbPath, (err) => {
         if (err) {
+          console.error('Database connection error:', err);
           reject(err);
         } else {
-          this.createTables().then(resolve).catch(reject);
+          console.error('Database connected successfully');
+          this.createTables().then(() => {
+            console.error('Database tables created/verified');
+            resolve();
+          }).catch(reject);
         }
       });
     });
@@ -132,6 +139,7 @@ export class Database {
   }
 
   async savePattern(domain, pattern) {
+    console.error(`Saving pattern "${pattern.name}" for domain "${domain}"`);
     const siteId = await this.getSiteId(domain);
     
     return new Promise((resolve, reject) => {
@@ -148,8 +156,10 @@ export class Database {
         ],
         function(err) {
           if (err) {
+            console.error('Error saving pattern:', err);
             reject(err);
           } else {
+            console.error(`Pattern saved with ID: ${this.lastID}`);
             resolve(this.lastID);
           }
         }
@@ -158,6 +168,7 @@ export class Database {
   }
 
   async getPatterns(domain) {
+    console.error(`Getting patterns for domain: ${domain}`);
     const siteId = await this.getSiteId(domain);
     
     return new Promise((resolve, reject) => {
@@ -166,8 +177,10 @@ export class Database {
         [siteId],
         (err, rows) => {
           if (err) {
+            console.error('Error getting patterns:', err);
             reject(err);
           } else {
+            console.error(`Found ${rows.length} patterns for ${domain}`);
             const patterns = rows.map(row => ({
               ...row,
               selectors: JSON.parse(row.selectors),
