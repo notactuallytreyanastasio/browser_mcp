@@ -169,13 +169,18 @@ class BrowserMCPServer {
         },
         {
           name: 'apply_saved_pattern',
-          description: 'Apply a previously saved pattern to extract data from the current page',
+          description: 'Apply a previously saved pattern to extract data from the current page and optionally save to database',
           inputSchema: {
             type: 'object',
             properties: {
               pattern_name: {
                 type: 'string',
                 description: 'Name of the saved pattern to apply',
+              },
+              save_links: {
+                type: 'boolean',
+                description: 'Whether to automatically save extracted links to database (default: true)',
+                default: true
               },
             },
             required: ['pattern_name'],
@@ -332,6 +337,25 @@ class BrowserMCPServer {
           },
         },
         {
+          name: 'query_with_natural_language',
+          description: 'Describe what you want to find and get AI-generated SQL with results',
+          inputSchema: {
+            type: 'object',
+            properties: {
+              description: {
+                type: 'string',
+                description: 'Natural language description of what you want to find (e.g., "Show me my highest rated AI-related links from Hacker News")'
+              },
+              execute: {
+                type: 'boolean',
+                description: 'Whether to execute the generated query (default: true)',
+                default: true
+              }
+            },
+            required: ['description']
+          },
+        },
+        {
           name: 'get_database_schema',
           description: 'Get the database schema and table structure',
           inputSchema: {
@@ -384,7 +408,7 @@ class BrowserMCPServer {
             return await this.clearLearningMode();
           
           case 'apply_saved_pattern':
-            return await this.applySavedPattern(args.pattern_name);
+            return await this.applySavedPattern(args.pattern_name, args.save_links !== false);
           
           case 'list_all_patterns':
             return await this.listAllPatterns();
@@ -400,6 +424,9 @@ class BrowserMCPServer {
           
           case 'execute_sql':
             return await this.executeSql(args.query, args.params || []);
+          
+          case 'query_with_natural_language':
+            return await this.queryWithNaturalLanguage(args.description, args.execute !== false);
           
           case 'get_database_schema':
             return await this.getDatabaseSchema();
@@ -515,11 +542,28 @@ class BrowserMCPServer {
     // Respect rate limits
     await this.sessionManager.respectRateLimit(domain);
     
-    // Navigate with timeout and proper waiting
-    await this.page.goto(url, { 
-      waitUntil: 'networkidle',
-      timeout: 30000 
-    });
+    // Navigate with better timeout handling for problematic sites
+    try {
+      await this.page.goto(url, { 
+        waitUntil: 'domcontentloaded',
+        timeout: 45000 
+      });
+    } catch (error) {
+      // If domcontentloaded fails, try with load
+      console.error(`Navigation with domcontentloaded failed, trying with load: ${error.message}`);
+      try {
+        await this.page.goto(url, { 
+          waitUntil: 'load',
+          timeout: 60000 
+        });
+      } catch (error2) {
+        // If load fails, try with no wait condition
+        console.error(`Navigation with load failed, trying with no wait: ${error2.message}`);
+        await this.page.goto(url, { 
+          timeout: 30000 
+        });
+      }
+    }
     
     // Save session after successful navigation
     await this.sessionManager.savePageSession(this.page, domain);
@@ -727,21 +771,64 @@ class BrowserMCPServer {
       await this.browser.close();
     }
 
-    // Launch browser in HEAD mode (visible)
-    this.browser = await chromium.launch({ 
-      headless: false,
-      slowMo: 200 // Slower for better visibility
-    });
-    this.page = await this.browser.newPage();
-    
-    // Set user agent
-    await this.page.setUserAgent('Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
-    
-    if (url) {
-      if (!url.startsWith('http://') && !url.startsWith('https://')) {
-        url = 'https://' + url;
+    try {
+      // Launch browser in HEAD mode (visible)
+      this.browser = await chromium.launch({ 
+        headless: false,
+        slowMo: 200, // Slower for better visibility
+        args: [
+          '--no-first-run',
+          '--no-default-browser-check',
+          '--disable-blink-features=AutomationControlled',
+          '--disable-web-security'
+        ]
+      });
+      
+      // Create context with user agent
+      const context = await this.browser.newContext({
+        viewport: { width: 1920, height: 1080 },
+        userAgent: this.sessionManager.getRandomUserAgent()
+      });
+      
+      this.page = await context.newPage();
+      
+      // Set up detection prevention
+      await this.sessionManager.handleDetectionPrevention(this.page);
+      
+      if (url) {
+        if (!url.startsWith('http://') && !url.startsWith('https://')) {
+          url = 'https://' + url;
+        }
+        
+        const domain = new URL(url).hostname;
+        
+        // Set up session for this domain
+        await this.sessionManager.setupPageForDomain(this.page, domain);
+        
+        // Navigate with better timeout handling
+        await this.page.goto(url, { 
+          waitUntil: 'domcontentloaded',
+          timeout: 45000 // Longer timeout for problematic sites
+        });
+        
+        // Save session after navigation
+        await this.sessionManager.savePageSession(this.page, domain);
       }
-      await this.page.goto(url);
+    } catch (error) {
+      console.error('Visual browser launch failed:', error);
+      
+      // Cleanup on failure
+      if (this.browser) {
+        try {
+          await this.browser.close();
+        } catch (e) {
+          console.error('Failed to close browser after error:', e);
+        }
+        this.browser = null;
+        this.page = null;
+      }
+      
+      throw new Error(`Failed to launch visual browser: ${error.message}`);
     }
 
     return {
@@ -1130,7 +1217,7 @@ class BrowserMCPServer {
     };
   }
 
-  async applySavedPattern(patternName) {
+  async applySavedPattern(patternName, saveLinks = true) {
     if (!this.page) {
       throw new Error('No browser page open.');
     }
@@ -1193,6 +1280,45 @@ class BrowserMCPServer {
       await this.database.incrementPatternSuccess(pattern.id);
     }
 
+    // Save extracted links to database automatically (if enabled)
+    let savedLinksCount = 0;
+    if (saveLinks && extractedData.length > 0) {
+      for (const item of extractedData) {
+        // Apply smart filtering based on site type
+        let shouldSave = false;
+        
+        if (domain === 'news.ycombinator.com') {
+          shouldSave = this.isHackerNewsStory(item.text, item.href);
+        } else if (item.href && item.text.length > 10) {
+          // For other sites, use basic filtering
+          shouldSave = true;
+        }
+        
+        if (shouldSave) {
+          try {
+            // Make relative URLs absolute
+            let fullUrl = item.href;
+            if (item.href && !item.href.startsWith('http')) {
+              fullUrl = new URL(item.href, currentUrl).toString();
+            }
+
+            await this.database.saveLink({
+              title: item.text,
+              url: fullUrl,
+              sourceSite: domain,
+              sourcePage: new URL(currentUrl).pathname,
+              isCurated: false,
+              isPublic: false
+            });
+            savedLinksCount++;
+          } catch (error) {
+            // Link might already exist (duplicate URL) or other error, which is fine
+            console.error(`Failed to save link: ${error.message}`);
+          }
+        }
+      }
+    }
+
     return {
       content: [
         {
@@ -1203,7 +1329,8 @@ class BrowserMCPServer {
                 extractedData.map((item, i) => 
                   `${i + 1}. ${item.text}${item.href ? ` (${item.href})` : ''}`
                 ).join('\n') +
-                (extractedData.length === 0 ? '\nNo elements found. The page structure may have changed.' : ''),
+                (extractedData.length === 0 ? '\nNo elements found. The page structure may have changed.' : '') +
+                (savedLinksCount > 0 ? `\n\n💾 Saved ${savedLinksCount} new links to database` : ''),
         },
       ],
     };
@@ -1269,11 +1396,12 @@ class BrowserMCPServer {
     };
   }
 
-  async getTopStoriesMulti(sites, count = 10, format = 'markdown') {
+  async getTopStoriesMulti(sites, count = 10, format = 'markdown', saveLinks = true) {
     console.error(`Getting top ${count} stories from sites: ${sites.join(', ')}`);
     
     const allStories = [];
     const errors = [];
+    let savedLinksCount = 0;
     
     for (const site of sites) {
       try {
@@ -1282,6 +1410,26 @@ class BrowserMCPServer {
         // Normalize site input
         const siteInfo = this.normalizeSiteInput(site);
         const stories = await this.extractStoriesFromSite(siteInfo, count);
+        
+        // Save links to database if requested
+        if (saveLinks) {
+          for (const story of stories) {
+            try {
+              await this.database.saveLink({
+                title: story.title,
+                url: story.url,
+                sourceSite: siteInfo.domain,
+                sourcePage: siteInfo.displayName,
+                isCurated: false,
+                isPublic: false
+              });
+              savedLinksCount++;
+            } catch (error) {
+              // Link might already exist (duplicate URL), which is fine
+              console.error(`Failed to save link: ${error.message}`);
+            }
+          }
+        }
         
         allStories.push({
           site: siteInfo.displayName,
@@ -1296,11 +1444,17 @@ class BrowserMCPServer {
     }
 
     // Format output
+    let output = this.formatMultiSiteOutput(allStories, errors, format);
+    
+    if (saveLinks && savedLinksCount > 0) {
+      output += `\n\n💾 Saved ${savedLinksCount} new links to database`;
+    }
+
     return {
       content: [
         {
           type: 'text',
-          text: this.formatMultiSiteOutput(allStories, errors, format),
+          text: output,
         },
       ],
     };
@@ -1363,11 +1517,26 @@ class BrowserMCPServer {
     // Respect rate limits
     await this.sessionManager.respectRateLimit(domain, 2000, 5000);
     
-    // Navigate with proper session handling
-    await this.page.goto(siteInfo.url, { 
-      waitUntil: 'networkidle',
-      timeout: 30000 
-    });
+    // Navigate with better timeout handling for problematic sites
+    try {
+      await this.page.goto(siteInfo.url, { 
+        waitUntil: 'domcontentloaded',
+        timeout: 45000 
+      });
+    } catch (error) {
+      console.error(`Navigation with domcontentloaded failed, trying with load: ${error.message}`);
+      try {
+        await this.page.goto(siteInfo.url, { 
+          waitUntil: 'load',
+          timeout: 60000 
+        });
+      } catch (error2) {
+        console.error(`Navigation with load failed, trying with no wait: ${error2.message}`);
+        await this.page.goto(siteInfo.url, { 
+          timeout: 30000 
+        });
+      }
+    }
     
     // Save session after navigation
     await this.sessionManager.savePageSession(this.page, domain);
@@ -1406,17 +1575,35 @@ class BrowserMCPServer {
             const href = await el.getAttribute('href');
             
             if (text && text.trim()) {
-              // Make relative URLs absolute
-              let fullUrl = href;
-              if (href && !href.startsWith('http')) {
-                fullUrl = new URL(href, siteInfo.url).toString();
+              // Filter out non-story elements for Hacker News
+              if (siteInfo.type === 'hackernews') {
+                // Skip navigation, user links, and other non-story elements
+                if (this.isHackerNewsStory(text.trim(), href)) {
+                  // Make relative URLs absolute
+                  let fullUrl = href;
+                  if (href && !href.startsWith('http')) {
+                    fullUrl = new URL(href, siteInfo.url).toString();
+                  }
+                  
+                  stories.push({
+                    title: text.trim(),
+                    url: fullUrl,
+                    selector: selector
+                  });
+                }
+              } else {
+                // For other sites, use original logic
+                let fullUrl = href;
+                if (href && !href.startsWith('http')) {
+                  fullUrl = new URL(href, siteInfo.url).toString();
+                }
+                
+                stories.push({
+                  title: text.trim(),
+                  url: fullUrl,
+                  selector: selector
+                });
               }
-              
-              stories.push({
-                title: text.trim(),
-                url: fullUrl,
-                selector: selector
-              });
             }
           }
           break; // Use first working selector
@@ -1553,6 +1740,362 @@ class BrowserMCPServer {
         },
       ],
     };
+  }
+
+  async queryLinks(filters) {
+    try {
+      const links = await this.database.getLinks(filters);
+      
+      let output = `# Saved Links Query Results\n\n`;
+      output += `Found ${links.length} links\n\n`;
+      
+      if (links.length === 0) {
+        output += 'No links found matching your criteria.\n';
+      } else {
+        links.forEach((link, i) => {
+          output += `## ${i + 1}. ${link.title}\n`;
+          output += `**URL:** ${link.url}\n`;
+          output += `**Source:** ${link.source_page} (${link.source_site})\n`;
+          
+          if (link.description) {
+            output += `**Description:** ${link.description}\n`;
+          }
+          
+          if (link.tags.length > 0) {
+            output += `**Tags:** ${link.tags.join(', ')}\n`;
+          }
+          
+          if (link.score > 0) {
+            output += `**Score:** ${'⭐'.repeat(link.score)} (${link.score}/5)\n`;
+          }
+          
+          output += `**Status:** ${link.is_curated ? '✅ Curated' : '📝 Auto-saved'}`;
+          if (link.is_public) output += ' • 🌐 Public';
+          output += `\n`;
+          
+          output += `**Added:** ${new Date(link.extracted_at).toLocaleDateString()}\n`;
+          
+          if (link.notes) {
+            output += `**Notes:** ${link.notes}\n`;
+          }
+          
+          output += '\n';
+        });
+      }
+      
+      return {
+        content: [
+          {
+            type: 'text',
+            text: output,
+          },
+        ],
+      };
+    } catch (error) {
+      throw new Error(`Failed to query links: ${error.message}`);
+    }
+  }
+
+  async curateLink(args) {
+    try {
+      const { link_id, ...updates } = args;
+      
+      // Mark as curated
+      updates.is_curated = true;
+      
+      const changes = await this.database.updateLink(link_id, updates);
+      
+      if (changes === 0) {
+        throw new Error(`Link with ID ${link_id} not found`);
+      }
+      
+      let output = `✅ Link ${link_id} has been curated!\n\n`;
+      
+      if (updates.score) {
+        output += `🌟 Score: ${'⭐'.repeat(updates.score)} (${updates.score}/5)\n`;
+      }
+      
+      if (updates.tags && updates.tags.length > 0) {
+        output += `🏷️ Tags: ${updates.tags.join(', ')}\n`;
+      }
+      
+      if (updates.is_public) {
+        output += `🌐 Made public for sharing\n`;
+      }
+      
+      if (updates.notes) {
+        output += `📝 Notes added\n`;
+      }
+      
+      return {
+        content: [
+          {
+            type: 'text',
+            text: output,
+          },
+        ],
+      };
+    } catch (error) {
+      throw new Error(`Failed to curate link: ${error.message}`);
+    }
+  }
+
+  async executeSql(query, params = []) {
+    try {
+      const results = await this.database.executeSql(query, params);
+      
+      let output = `# SQL Query Results\n\n`;
+      output += `**Query:** \`${query}\`\n\n`;
+      
+      if (results.length === 0) {
+        output += 'No results found.\n';
+      } else {
+        output += `Found ${results.length} rows:\n\n`;
+        
+        // Format as table
+        if (results.length > 0) {
+          const headers = Object.keys(results[0]);
+          
+          // Headers
+          output += `| ${headers.join(' | ')} |\n`;
+          output += `| ${headers.map(() => '---').join(' | ')} |\n`;
+          
+          // Rows
+          results.forEach(row => {
+            const values = headers.map(header => {
+              const value = row[header];
+              return value !== null && value !== undefined ? String(value) : '';
+            });
+            output += `| ${values.join(' | ')} |\n`;
+          });
+        }
+      }
+      
+      return {
+        content: [
+          {
+            type: 'text',
+            text: output,
+          },
+        ],
+      };
+    } catch (error) {
+      throw new Error(`SQL query failed: ${error.message}`);
+    }
+  }
+
+  async getDatabaseSchema() {
+    try {
+      const schema = await this.database.getSchema();
+      
+      let output = `# Database Schema\n\n`;
+      
+      schema.forEach(table => {
+        output += `## Table: ${table.name}\n\n`;
+        output += '```sql\n';
+        output += table.sql + '\n';
+        output += '```\n\n';
+      });
+      
+      output += `## Quick Examples\n\n`;
+      output += '**Get all curated links:**\n';
+      output += '```sql\n';
+      output += 'SELECT title, url, score FROM links WHERE is_curated = 1 ORDER BY score DESC;\n';
+      output += '```\n\n';
+      
+      output += '**Get links by source:**\n';
+      output += '```sql\n';
+      output += "SELECT title, url FROM links WHERE source_site = 'news.ycombinator.com';\n";
+      output += '```\n\n';
+      
+      output += '**Search links:**\n';
+      output += '```sql\n';
+      output += "SELECT title, url FROM links WHERE title LIKE '%AI%' OR notes LIKE '%AI%';\n";
+      output += '```\n\n';
+      
+      return {
+        content: [
+          {
+            type: 'text',
+            text: output,
+          },
+        ],
+      };
+    } catch (error) {
+      throw new Error(`Failed to get schema: ${error.message}`);
+    }
+  }
+
+  async queryWithNaturalLanguage(description, execute = true) {
+    try {
+      // Get database schema for context
+      const schema = await this.database.getSchema();
+      
+      // Create context about the database structure
+      const schemaContext = schema.map(table => `${table.name}: ${table.sql}`).join('\n\n');
+      
+      // Generate SQL using AI reasoning
+      const sqlQuery = await this.generateSqlFromDescription(description, schemaContext);
+      
+      let output = `# Natural Language Query\\n\\n`;
+      output += `**Request:** ${description}\\n\\n`;
+      output += `**Generated SQL:**\\n\`\`\`sql\\n${sqlQuery}\\n\`\`\`\\n\\n`;
+      
+      if (execute) {
+        try {
+          const results = await this.database.executeSql(sqlQuery);
+          
+          if (results.length === 0) {
+            output += 'No results found.\\n';
+          } else {
+            output += `**Results (${results.length} rows):**\\n\\n`;
+            
+            // Format as table
+            if (results.length > 0) {
+              const headers = Object.keys(results[0]);
+              
+              // Headers
+              output += `| ${headers.join(' | ')} |\\n`;
+              output += `| ${headers.map(() => '---').join(' | ')} |\\n`;
+              
+              // Rows
+              results.forEach(row => {
+                const values = headers.map(header => {
+                  const value = row[header];
+                  return value !== null && value !== undefined ? String(value) : '';
+                });
+                output += `| ${values.join(' | ')} |\\n`;
+              });
+            }
+          }
+        } catch (sqlError) {
+          output += `**Execution Error:** ${sqlError.message}\\n\\n`;
+          output += 'The query was generated but failed to execute. You can try modifying it manually.\\n';
+        }
+      } else {
+        output += '*Query generated but not executed (execute=false)*\\n';
+      }
+      
+      return {
+        content: [
+          {
+            type: 'text',
+            text: output,
+          },
+        ],
+      };
+    } catch (error) {
+      throw new Error(`Failed to process natural language query: ${error.message}`);
+    }
+  }
+
+  generateSqlFromDescription(description, schemaContext) {
+    // Simple SQL generation based on common patterns
+    // This is a basic implementation - in practice you'd want more sophisticated NLP
+    
+    const desc = description.toLowerCase();
+    
+    // Common patterns and their SQL equivalents
+    if (desc.includes('highest rated') || desc.includes('best') || desc.includes('top rated')) {
+      if (desc.includes('links')) {
+        return 'SELECT title, url, score, source_site FROM links WHERE score > 0 ORDER BY score DESC LIMIT 10;';
+      }
+    }
+    
+    if (desc.includes('curated') && desc.includes('links')) {
+      return 'SELECT title, url, score, tags, source_site FROM links WHERE is_curated = 1 ORDER BY score DESC;';
+    }
+    
+    if (desc.includes('public') && desc.includes('links')) {
+      return 'SELECT title, url, score, source_site FROM links WHERE is_public = 1 ORDER BY score DESC;';
+    }
+    
+    if (desc.includes('hacker news') || desc.includes('hn')) {
+      return "SELECT title, url, score FROM links WHERE source_site = 'news.ycombinator.com' ORDER BY extracted_at DESC;";
+    }
+    
+    if (desc.includes('reddit')) {
+      return "SELECT title, url, source_page, extracted_at FROM links WHERE source_site LIKE '%reddit%' ORDER BY extracted_at DESC;";
+    }
+    
+    if (desc.includes('recent') || desc.includes('latest')) {
+      return 'SELECT title, url, source_site, extracted_at FROM links ORDER BY extracted_at DESC LIMIT 20;';
+    }
+    
+    if (desc.includes('ai') || desc.includes('artificial intelligence')) {
+      return "SELECT title, url, score, source_site FROM links WHERE (title LIKE '%AI%' OR title LIKE '%artificial intelligence%' OR notes LIKE '%AI%') ORDER BY score DESC;";
+    }
+    
+    if (desc.includes('count') || desc.includes('how many')) {
+      if (desc.includes('curated')) {
+        return 'SELECT COUNT(*) as curated_count FROM links WHERE is_curated = 1;';
+      }
+      return 'SELECT COUNT(*) as total_links FROM links;';
+    }
+    
+    // Default: return all recent links
+    return 'SELECT title, url, source_site, extracted_at FROM links ORDER BY extracted_at DESC LIMIT 10;';
+  }
+
+  isHackerNewsStory(text, href) {
+    // Filter out HN navigation and non-story elements
+    const navigationItems = [
+      'Hacker News', 'new', 'past', 'comments', 'ask', 'show', 'jobs', 
+      'submit', 'login', 'hide', 'discuss', 'More', 'Guidelines', 'FAQ', 
+      'Lists', 'API', 'Security', 'Legal', 'Apply to YC', 'Contact'
+    ];
+    
+    // Skip navigation items
+    if (navigationItems.includes(text)) {
+      return false;
+    }
+    
+    // Skip if it's a user link (user?id=...)
+    if (href && href.includes('user?id=')) {
+      return false;
+    }
+    
+    // Skip if it's a time link (item?id=... but text contains "ago" or "hour" or "minute")
+    if (href && href.includes('item?id=') && (text.includes('ago') || text.includes('hour') || text.includes('minute'))) {
+      return false;
+    }
+    
+    // Skip if it's a hide link
+    if (href && href.includes('hide?id=')) {
+      return false;
+    }
+    
+    // Skip if it's a comment count (ends with "comments")
+    if (text.match(/^\d+\s*(comments?|comment)$/)) {
+      return false;
+    }
+    
+    // Skip if it's just a domain (from?site=...)
+    if (href && href.includes('from?site=')) {
+      return false;
+    }
+    
+    // Skip very short titles (likely not real stories)
+    if (text.length < 10) {
+      return false;
+    }
+    
+    // If it has an external URL (starts with http) and reasonable length, it's likely a story
+    if (href && href.startsWith('http') && text.length > 10) {
+      return true;
+    }
+    
+    // For HN internal links, check if it's a Show HN or Ask HN
+    if (text.startsWith('Show HN:') || text.startsWith('Ask HN:')) {
+      return true;
+    }
+    
+    // If it doesn't start with common navigation patterns and has reasonable length
+    if (text.length > 15 && !text.match(/^\d+\s*(hours?|minutes?|days?)\s*ago$/)) {
+      return true;
+    }
+    
+    return false;
   }
 
   async run() {
