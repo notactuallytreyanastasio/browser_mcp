@@ -1,0 +1,222 @@
+import sqlite3 from 'sqlite3';
+import { fileURLToPath } from 'url';
+import { dirname, join } from 'path';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
+
+export class Database {
+  constructor() {
+    this.db = null;
+  }
+
+  async init() {
+    return new Promise((resolve, reject) => {
+      const dbPath = join(__dirname, '..', 'browser_patterns.db');
+      this.db = new sqlite3.Database(dbPath, (err) => {
+        if (err) {
+          reject(err);
+        } else {
+          this.createTables().then(resolve).catch(reject);
+        }
+      });
+    });
+  }
+
+  async createTables() {
+    return new Promise((resolve, reject) => {
+      const sql = `
+        CREATE TABLE IF NOT EXISTS sites (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          domain TEXT UNIQUE,
+          name TEXT,
+          created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        );
+
+        CREATE TABLE IF NOT EXISTS patterns (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          site_id INTEGER,
+          pattern_name TEXT,
+          description TEXT,
+          selectors TEXT, -- JSON array of selectors
+          sample_data TEXT, -- JSON sample of extracted data
+          success_count INTEGER DEFAULT 0,
+          created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+          updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+          FOREIGN KEY (site_id) REFERENCES sites (id)
+        );
+
+        CREATE TABLE IF NOT EXISTS interactions (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          site_id INTEGER,
+          url TEXT,
+          element_selector TEXT,
+          element_text TEXT,
+          element_type TEXT, -- link, button, text, etc.
+          x_position INTEGER,
+          y_position INTEGER,
+          action TEXT, -- click, hover, extract
+          result TEXT, -- what happened after the action
+          timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
+          FOREIGN KEY (site_id) REFERENCES sites (id)
+        );
+      `;
+
+      this.db.exec(sql, (err) => {
+        if (err) {
+          reject(err);
+        } else {
+          resolve();
+        }
+      });
+    });
+  }
+
+  async getSiteId(domain) {
+    return new Promise((resolve, reject) => {
+      this.db.get(
+        'SELECT id FROM sites WHERE domain = ?',
+        [domain],
+        (err, row) => {
+          if (err) {
+            reject(err);
+          } else if (row) {
+            resolve(row.id);
+          } else {
+            // Create new site
+            this.db.run(
+              'INSERT INTO sites (domain, name) VALUES (?, ?)',
+              [domain, domain],
+              function(err) {
+                if (err) {
+                  reject(err);
+                } else {
+                  resolve(this.lastID);
+                }
+              }
+            );
+          }
+        }
+      );
+    });
+  }
+
+  async saveInteraction(domain, interaction) {
+    const siteId = await this.getSiteId(domain);
+    
+    return new Promise((resolve, reject) => {
+      this.db.run(
+        `INSERT INTO interactions 
+         (site_id, url, element_selector, element_text, element_type, x_position, y_position, action, result)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [
+          siteId,
+          interaction.url,
+          interaction.selector,
+          interaction.text,
+          interaction.type,
+          interaction.x,
+          interaction.y,
+          interaction.action,
+          interaction.result
+        ],
+        function(err) {
+          if (err) {
+            reject(err);
+          } else {
+            resolve(this.lastID);
+          }
+        }
+      );
+    });
+  }
+
+  async savePattern(domain, pattern) {
+    const siteId = await this.getSiteId(domain);
+    
+    return new Promise((resolve, reject) => {
+      this.db.run(
+        `INSERT INTO patterns 
+         (site_id, pattern_name, description, selectors, sample_data)
+         VALUES (?, ?, ?, ?, ?)`,
+        [
+          siteId,
+          pattern.name,
+          pattern.description,
+          JSON.stringify(pattern.selectors),
+          JSON.stringify(pattern.sampleData)
+        ],
+        function(err) {
+          if (err) {
+            reject(err);
+          } else {
+            resolve(this.lastID);
+          }
+        }
+      );
+    });
+  }
+
+  async getPatterns(domain) {
+    const siteId = await this.getSiteId(domain);
+    
+    return new Promise((resolve, reject) => {
+      this.db.all(
+        'SELECT * FROM patterns WHERE site_id = ? ORDER BY success_count DESC, updated_at DESC',
+        [siteId],
+        (err, rows) => {
+          if (err) {
+            reject(err);
+          } else {
+            const patterns = rows.map(row => ({
+              ...row,
+              selectors: JSON.parse(row.selectors),
+              sampleData: JSON.parse(row.sample_data)
+            }));
+            resolve(patterns);
+          }
+        }
+      );
+    });
+  }
+
+  async getInteractions(domain, limit = 50) {
+    const siteId = await this.getSiteId(domain);
+    
+    return new Promise((resolve, reject) => {
+      this.db.all(
+        'SELECT * FROM interactions WHERE site_id = ? ORDER BY timestamp DESC LIMIT ?',
+        [siteId, limit],
+        (err, rows) => {
+          if (err) {
+            reject(err);
+          } else {
+            resolve(rows);
+          }
+        }
+      );
+    });
+  }
+
+  async incrementPatternSuccess(patternId) {
+    return new Promise((resolve, reject) => {
+      this.db.run(
+        'UPDATE patterns SET success_count = success_count + 1, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
+        [patternId],
+        function(err) {
+          if (err) {
+            reject(err);
+          } else {
+            resolve();
+          }
+        }
+      );
+    });
+  }
+
+  close() {
+    if (this.db) {
+      this.db.close();
+    }
+  }
+}

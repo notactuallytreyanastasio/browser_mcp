@@ -10,9 +10,14 @@
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.0.0",
-    "playwright": "^1.40.0"
+    "playwright": "^1.40.0",
+    "sqlite3": "^5.1.7"
   },
-  "keywords": ["mcp", "browser", "automation"],
+  "keywords": [
+    "mcp",
+    "browser",
+    "automation"
+  ],
   "author": "",
   "license": "MIT"
 }
