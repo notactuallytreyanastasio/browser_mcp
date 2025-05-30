@@ -188,13 +188,18 @@ Your link garden can also learn from your everyday browsing to understand your n
 > "Can you check what browsers I have available for monitoring my browsing patterns?"
 
 **Sync your browsing history:**
-> "Sync my Chrome browsing history from the last week so you can see what I naturally browse"
+> "Sync my Safari browsing history from the last week so you can see what I naturally browse"
+
+> "Sync my Chrome browsing history from the last week"
 
 **Discover hidden gems:**
 > "Look through my browsing history and find interesting links I visited but haven't saved to my garden yet"
 
 **Understand your patterns:**
 > "Analyze my browsing patterns to show me what I'm naturally interested in"
+
+**Safari users get extra insights:**
+> "Analyze my Safari metadata to see detailed browsing intelligence"
 
 This creates two types of links in your garden:
 - 🌱 **Organic browsing** - Things you naturally discovered while browsing

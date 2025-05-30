@@ -658,6 +658,25 @@ class BrowserMCPServer {
             }
           },
         },
+        {
+          name: 'analyze_safari_metadata',
+          description: 'Deep analysis of Safari browsing patterns using rich metadata (Safari only)',
+          inputSchema: {
+            type: 'object',
+            properties: {
+              days: {
+                type: 'number',
+                description: 'Number of days to analyze (default: 7)',
+                default: 7
+              },
+              limit: {
+                type: 'number',
+                description: 'Number of entries to analyze (default: 100)',
+                default: 100
+              }
+            }
+          },
+        },
       ],
     }));
 
@@ -781,6 +800,9 @@ class BrowserMCPServer {
           
           case 'get_browsing_stats':
             return await this.getBrowsingStats(args.days || 7);
+          
+          case 'analyze_safari_metadata':
+            return await this.analyzeSafariMetadata(args.days || 7, args.limit || 100);
           
           default:
             throw new Error(`Unknown tool: ${name}`);
@@ -4584,9 +4606,37 @@ Try:
         const browserBadge = entry.browser ? `[${entry.browser}]` : '';
         const organicBadge = entry.is_organic ? '🌱' : '🤖';
         
+        let extraInfo = '';
+        
+        // Add Safari-specific rich metadata display
+        if (entry.browser === 'safari' && entry.metadata) {
+          const meta = entry.metadata;
+          const details = [];
+          
+          if (meta.origin && meta.origin !== 'unknown') {
+            details.push(`${this.getSafariOriginEmoji(meta.origin)} ${meta.origin}`);
+          }
+          
+          if (meta.visit_count_score > 100) {
+            details.push(`⭐ High relevance (${meta.visit_count_score})`);
+          }
+          
+          if (meta.visit_type === 'redirected') {
+            details.push('🔄 Redirected');
+          }
+          
+          if (meta.domain_expansion) {
+            details.push('🔍 Autocomplete suggested');
+          }
+          
+          if (details.length > 0) {
+            extraInfo = `\n   📊 ${details.join(' • ')}`;
+          }
+        }
+        
         return `${i + 1}. ${organicBadge} **${entry.title || 'Untitled'}** ${browserBadge}
    🔗 ${entry.url}
-   🕐 ${timeAgo}`;
+   🕐 ${timeAgo}${extraInfo}`;
       }).join('\n\n');
 
       return {
@@ -4775,6 +4825,154 @@ Use \`analyze_browsing_patterns\` for deeper insights into your browsing habits!
       return `${diffHours}h ago`;
     } else {
       return `${diffDays}d ago`;
+    }
+  }
+
+  getSafariOriginEmoji(origin) {
+    const emojiMap = {
+      'user_typed': '⌨️',
+      'user_clicked': '👆',
+      'bookmark': '⭐',
+      'search': '🔍',
+      'reload': '🔄',
+      'redirect': '↩️',
+      'form_submit': '📝',
+      'javascript': '⚙️'
+    };
+    
+    return emojiMap[origin] || '❓';
+  }
+
+  async analyzeSafariMetadata(days = 7, limit = 100) {
+    try {
+      const since = new Date(Date.now() - days * 60 * 60 * 1000).toISOString();
+      
+      const history = await this.database.getBrowsingHistory({
+        since,
+        limit,
+        browser: 'safari'
+      });
+
+      if (history.length === 0) {
+        return {
+          content: [{
+            type: 'text',
+            text: `📊 No Safari browsing history found for the last ${days} days.
+
+Try syncing your Safari history first with:
+> "Sync my Safari browsing history from the last week"`
+          }]
+        };
+      }
+
+      // Analyze Safari-specific metadata
+      const analysis = {
+        origins: {},
+        relevanceScores: { high: 0, medium: 0, low: 0 },
+        visitTypes: { direct: 0, redirected: 0 },
+        autocompleteSuggestions: 0,
+        synthesizedVisits: 0,
+        totalEntries: history.length
+      };
+
+      const highRelevanceLinks = [];
+      const interestingPatterns = [];
+
+      history.forEach(entry => {
+        if (entry.metadata && entry.browser === 'safari') {
+          const meta = entry.metadata;
+          
+          // Analyze origins
+          if (meta.origin) {
+            analysis.origins[meta.origin] = (analysis.origins[meta.origin] || 0) + 1;
+          }
+          
+          // Analyze relevance scores
+          if (meta.visit_count_score) {
+            if (meta.visit_count_score > 200) {
+              analysis.relevanceScores.high++;
+              if (meta.visit_count_score > 500) {
+                highRelevanceLinks.push({
+                  title: entry.title,
+                  url: entry.url,
+                  score: meta.visit_count_score,
+                  origin: meta.origin
+                });
+              }
+            } else if (meta.visit_count_score > 50) {
+              analysis.relevanceScores.medium++;
+            } else {
+              analysis.relevanceScores.low++;
+            }
+          }
+          
+          // Analyze visit types
+          if (meta.visit_type) {
+            analysis.visitTypes[meta.visit_type]++;
+          }
+          
+          // Track autocomplete usage
+          if (meta.domain_expansion) {
+            analysis.autocompleteSuggestions++;
+          }
+          
+          // Track synthesized visits
+          if (meta.synthesized) {
+            analysis.synthesizedVisits++;
+          }
+        }
+      });
+
+      // Generate insights
+      const originBreakdown = Object.entries(analysis.origins)
+        .sort(([,a], [,b]) => b - a)
+        .map(([origin, count]) => `${this.getSafariOriginEmoji(origin)} ${origin}: ${count} visits`)
+        .join('\n');
+
+      const highRelevanceText = highRelevanceLinks.length > 0 
+        ? `\n**🌟 Highest Relevance Sites:**\n${highRelevanceLinks.slice(0, 5).map(link => 
+            `• ${link.title || 'Untitled'} (${link.score}) - ${link.origin}`
+          ).join('\n')}`
+        : '';
+
+      const organicPercentage = Math.round((history.filter(h => h.is_organic).length / history.length) * 100);
+
+      return {
+        content: [{
+          type: 'text',
+          text: `🧠 **Safari Browsing Intelligence** (${days} days, ${analysis.totalEntries} entries)
+
+**📊 How You Browse:**
+${originBreakdown}
+
+**🎯 Content Relevance:**
+• High relevance: ${analysis.relevanceScores.high} sites
+• Medium relevance: ${analysis.relevanceScores.medium} sites  
+• Low relevance: ${analysis.relevanceScores.low} sites
+
+**🌱 Browsing Nature:**
+• ${organicPercentage}% organic discovery
+• ${100 - organicPercentage}% intentional navigation
+
+**🔄 Navigation Patterns:**
+• Direct visits: ${analysis.visitTypes.direct || 0}
+• Redirected visits: ${analysis.visitTypes.redirected || 0}
+• Autocomplete usage: ${analysis.autocompleteSuggestions} times
+• Automated visits: ${analysis.synthesizedVisits}${highRelevanceText}
+
+This analysis uses Safari's unique browsing intelligence to understand your content discovery patterns!`
+        }]
+      };
+
+    } catch (error) {
+      return {
+        content: [{
+          type: 'text',
+          text: `❌ Safari metadata analysis failed: ${error.message}
+
+Make sure you have Safari browsing history synced first.`
+        }]
+      };
     }
   }
 

@@ -100,17 +100,30 @@ export class BrowserHistoryMonitor {
             SELECT 
               hi.url,
               hv.title,
-              datetime(hv.visit_time + 978307200, 'unixepoch') as visit_time,
-              hv.visit_count,
-              hi.visit_count as total_visits
+              datetime(hv.visit_time + 978307200, 'unixepoch', 'localtime') as visit_time,
+              hi.visit_count as total_visits,
+              hi.visit_count_score,
+              hi.domain_expansion,
+              hv.load_successful,
+              hv.http_non_get,
+              hv.synthesized,
+              hv.origin,
+              hv.generation,
+              hv.attributes,
+              hv.score as visit_score,
+              hv.redirect_source,
+              hv.redirect_destination,
+              hv.id as visit_id,
+              hi.id as item_id,
+              CASE WHEN hv.redirect_source IS NOT NULL THEN 'redirected' ELSE 'direct' END as visit_type
             FROM history_items hi
             JOIN history_visits hv ON hi.id = hv.history_item
-            WHERE 1=1
+            WHERE hv.load_successful = 1
           `;
           params = [];
           
           if (since) {
-            query += ` AND datetime(hv.visit_time + 978307200, 'unixepoch') >= ?`;
+            query += ` AND datetime(hv.visit_time + 978307200, 'unixepoch', 'localtime') >= ?`;
             params.push(since);
           }
           
@@ -186,21 +199,43 @@ export class BrowserHistoryMonitor {
     // Determine if this is organic browsing vs intentional
     const isOrganic = this.classifyBrowsingIntent(row, browserName);
     
-    return {
+    const baseEntry = {
       url: row.url,
       title: row.title,
       visit_time: row.visit_time,
       browser: browserName,
       visit_count: row.visit_count || row.total_visits || 1,
-      transition_type: this.mapTransitionType(row.transition),
+      transition_type: this.mapTransitionType(row.transition, browserName),
       visit_duration: row.visit_duration || null,
-      is_organic: isOrganic,
-      metadata: {
+      is_organic: isOrganic
+    };
+
+    // Add Safari-specific rich metadata
+    if (browserName === 'safari') {
+      baseEntry.metadata = {
+        original_visit_id: row.visit_id,
+        item_id: row.item_id,
+        visit_count_score: row.visit_count_score,
+        visit_score: row.visit_score,
+        domain_expansion: row.domain_expansion,
+        visit_type: row.visit_type,
+        origin: this.mapSafariOrigin(row.origin),
+        attributes: row.attributes,
+        generation: row.generation,
+        http_non_get: Boolean(row.http_non_get),
+        synthesized: Boolean(row.synthesized),
+        has_redirect: Boolean(row.redirect_source || row.redirect_destination)
+      };
+    } else {
+      // Chrome-based metadata
+      baseEntry.metadata = {
         original_visit_id: row.visit_id,
         from_visit: row.from_visit,
         raw_transition: row.transition
-      }
-    };
+      };
+    }
+
+    return baseEntry;
   }
 
   classifyBrowsingIntent(row, browserName) {
@@ -218,18 +253,48 @@ export class BrowserHistoryMonitor {
       return false;
     }
     
-    // Chrome transition types that indicate intentional browsing
-    if (browserName !== 'safari' && transition) {
-      const intentionalTransitions = [
-        0, // Typed URL (LINK)
-        2, // Auto bookmark
-        3, // Auto subframe  
-        6, // Manual subframe
-        8  // Reload
+    if (browserName === 'safari') {
+      // Safari-specific classification using origin and other metadata
+      const origin = row.origin;
+      const synthesized = row.synthesized;
+      const visitScore = row.visit_score;
+      
+      // Synthesized visits are usually automated
+      if (synthesized) {
+        return false;
+      }
+      
+      // Use Safari's origin classification
+      const intentionalOrigins = [
+        1, // user_typed
+        3, // bookmark  
+        5, // reload
+        8  // javascript (usually automated)
       ];
       
-      if (intentionalTransitions.includes(transition)) {
+      if (intentionalOrigins.includes(origin)) {
         return false;
+      }
+      
+      // Low visit scores might indicate automated or unintentional visits
+      if (visitScore !== null && visitScore < 10) {
+        return false;
+      }
+      
+    } else {
+      // Chrome transition types that indicate intentional browsing
+      if (transition) {
+        const intentionalTransitions = [
+          0, // Typed URL (LINK)
+          2, // Auto bookmark
+          3, // Auto subframe  
+          6, // Manual subframe
+          8  // Reload
+        ];
+        
+        if (intentionalTransitions.includes(transition)) {
+          return false;
+        }
       }
     }
     
@@ -242,9 +307,15 @@ export class BrowserHistoryMonitor {
     return true;
   }
 
-  mapTransitionType(transition) {
+  mapTransitionType(transition, browserName) {
     if (!transition) return null;
     
+    if (browserName === 'safari') {
+      // Safari doesn't use Chrome's transition system
+      return null;
+    }
+    
+    // Chrome-based transition mapping
     const transitionMap = {
       0: 'link',
       1: 'typed', 
@@ -260,6 +331,23 @@ export class BrowserHistoryMonitor {
     };
     
     return transitionMap[transition] || `unknown_${transition}`;
+  }
+
+  mapSafariOrigin(origin) {
+    // Safari origin codes based on WebKit source
+    const originMap = {
+      0: 'unknown',
+      1: 'user_typed',
+      2: 'user_clicked', 
+      3: 'bookmark',
+      4: 'search',
+      5: 'reload',
+      6: 'redirect',
+      7: 'form_submit',
+      8: 'javascript'
+    };
+    
+    return originMap[origin] || `unknown_${origin}`;
   }
 
   async analyzeBrowsingPatterns(days = 7) {
