@@ -1,0 +1,1 @@
+click-card:not(:defined) [slot=content]{display:none}

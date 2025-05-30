@@ -1,0 +1,1 @@
+.coachmark:not(:defined)>[slot=content]{display:none}

@@ -1,0 +1,1 @@
+#left-nav-drawer::part(base),#left-nav-drawer::part(overlay){top:calc(var(--shreddit-header-height) + 1px)}#left-nav-drawer::part(base){align-items:start;flex-direction:column;justify-content:start;z-index:5}#left-nav-drawer::part(panel){border-radius:0;box-shadow:none;max-height:none;width:280px}

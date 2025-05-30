@@ -1,0 +1,1 @@
+import{_ as a,n as t,e,p as s,T as o}from"./shell-2264602c.js";import{s as d}from"./icon-82dd10b4.js";let c=class extends d{constructor(){super(...arguments),this.data={}}connectedCallback(){super.connectedCallback(),s(o.PageDataLoaded,this.data)}};a([t({type:Object})],c.prototype,"data",void 0),c=a([e("reddit-page-data")],c);
