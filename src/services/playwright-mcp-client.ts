@@ -77,7 +77,9 @@ export class PlaywrightMCPClient {
           BROWSER: this.config.browser,
           HEADLESS: this.config.headless ? 'true' : 'false',
           VIEWPORT_WIDTH: this.config.viewport!.width.toString(),
-          VIEWPORT_HEIGHT: this.config.viewport!.height.toString()
+          VIEWPORT_HEIGHT: this.config.viewport!.height.toString(),
+          // Better User-Agent for Reddit
+          USER_AGENT: 'PersonalLinkGarden/1.0 (Compatible Browser for Personal Use; Contact: your-email@example.com)'
         }
       });
 
@@ -152,10 +154,26 @@ export class PlaywrightMCPClient {
   }
 
   async navigate(url: string): Promise<ActionResult> {
+    // Add delay to be respectful, especially for Reddit
+    if (url.includes('reddit.com')) {
+      await this.sleep(2000); // 2 second delay for Reddit
+    } else {
+      await this.sleep(1000); // 1 second delay for other sites
+    }
+
     return this.executeAction({
       type: 'navigate',
-      params: { url }
+      params: { 
+        url,
+        // Add extra options for better compatibility
+        waitUntil: 'networkidle',
+        timeout: 30000
+      }
     });
+  }
+
+  private sleep(ms: number): Promise<void> {
+    return new Promise(resolve => setTimeout(resolve, ms));
   }
 
   async click(selector: string): Promise<ActionResult> {

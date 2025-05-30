@@ -20,11 +20,12 @@
     "server_command": "npx",
     "server_args": ["@microsoft/playwright-mcp"],
     "browser": "chromium",
-    "headless": true,
+    "headless": false,
     "viewport": {
-      "width": 1280,
-      "height": 720
-    }
+      "width": 1920,
+      "height": 1080
+    },
+    "user_agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36 PersonalGarden/1.0"
   },
   
   "learning": {

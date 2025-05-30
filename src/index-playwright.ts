@@ -7,6 +7,7 @@ import { PlaywrightMCPClient } from './services/playwright-mcp-client.js';
 import { LearningModeService } from './services/learning-mode.js';
 import { ArchiveManager } from './tools/archive-manager.js';
 import { LinkManager } from './tools/link-manager.js';
+import { RedditExtractorFallback } from './tools/reddit-extractor-fallback.js';
 
 import type { MCPResult } from './types/index.js';
 import { BrowserError, DatabaseError } from './types/index.js';
@@ -18,6 +19,7 @@ class IntelligentContentDiscovery {
   private learningMode: LearningModeService;
   private archiveManager: ArchiveManager;
   private linkManager: LinkManager;
+  private redditFallback: RedditExtractorFallback;
 
   constructor() {
     this.server = new Server(
@@ -42,6 +44,7 @@ class IntelligentContentDiscovery {
     this.learningMode = new LearningModeService(this.playwrightClient, this.database);
     this.archiveManager = new ArchiveManager(this.database);
     this.linkManager = new LinkManager(this.database, this.server);
+    this.redditFallback = new RedditExtractorFallback(this.database);
     
     this.setupToolHandlers();
     this.initServices();
@@ -254,6 +257,29 @@ class IntelligentContentDiscovery {
           },
         },
 
+        // Reddit Fallback (when MCP is blocked)
+        {
+          name: 'reddit_connect_fallback',
+          description: 'Connect to fallback Reddit extractor when MCP is blocked',
+          inputSchema: { type: 'object', properties: {} },
+        },
+        {
+          name: 'reddit_get_stories',
+          description: 'Get Reddit stories using fallback extractor (bypasses blocks)',
+          inputSchema: {
+            type: 'object',
+            properties: {
+              count: { type: 'number', description: 'Number of stories to get', default: 10 },
+              subreddit: { type: 'string', description: 'Subreddit name (without /r/)' },
+            },
+          },
+        },
+        {
+          name: 'reddit_disconnect_fallback',
+          description: 'Disconnect from fallback Reddit extractor',
+          inputSchema: { type: 'object', properties: {} },
+        },
+
         // System
         {
           name: 'disconnect_browser',
@@ -363,6 +389,19 @@ class IntelligentContentDiscovery {
               args.archive_id as number, 
               args.show_resources !== false
             );
+
+          // Reddit Fallback
+          case 'reddit_connect_fallback':
+            return await this.connectRedditFallback();
+          
+          case 'reddit_get_stories':
+            return await this.getRedditStories(
+              args.count as number || 10,
+              args.subreddit as string
+            );
+          
+          case 'reddit_disconnect_fallback':
+            return await this.disconnectRedditFallback();
 
           // System
           case 'disconnect_browser':
@@ -606,6 +645,52 @@ ${results.slice(0, 3).map(r => `- ${r.field}: ${r.value}`).join('\n')}`
       };
     } catch (error) {
       throw new BrowserError(`Failed to disconnect: ${(error as Error).message}`, error as Error);
+    }
+  }
+
+  // Reddit Fallback Methods
+  private async connectRedditFallback(): Promise<MCPResult> {
+    try {
+      await this.redditFallback.connect();
+      return {
+        content: [{
+          type: 'text',
+          text: '🔄 Connected to fallback Reddit extractor\n\n⚠️ Using direct browser connection to bypass Reddit blocks.\nThis uses a visible browser window with human-like behavior.'
+        }]
+      };
+    } catch (error) {
+      throw new BrowserError(`Failed to connect fallback: ${(error as Error).message}`, error as Error);
+    }
+  }
+
+  private async getRedditStories(count: number, subreddit?: string): Promise<MCPResult> {
+    if (!this.redditFallback.isConnected()) {
+      return {
+        content: [{
+          type: 'text',
+          text: '❌ Not connected to fallback extractor. Use "reddit_connect_fallback" first.'
+        }]
+      };
+    }
+
+    try {
+      return await this.redditFallback.getRedditStories(count, subreddit);
+    } catch (error) {
+      throw new BrowserError(`Reddit extraction failed: ${(error as Error).message}`, error as Error);
+    }
+  }
+
+  private async disconnectRedditFallback(): Promise<MCPResult> {
+    try {
+      await this.redditFallback.disconnect();
+      return {
+        content: [{
+          type: 'text',
+          text: '✅ Disconnected from fallback Reddit extractor'
+        }]
+      };
+    } catch (error) {
+      throw new BrowserError(`Failed to disconnect fallback: ${(error as Error).message}`, error as Error);
     }
   }
 
