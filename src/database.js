@@ -118,6 +118,27 @@ export class Database {
           file_size INTEGER,
           FOREIGN KEY (archive_id) REFERENCES archives (id)
         );
+
+        CREATE TABLE IF NOT EXISTS browsing_history (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          url TEXT NOT NULL,
+          title TEXT,
+          visit_time DATETIME NOT NULL,
+          browser TEXT, -- chrome, safari, firefox
+          visit_count INTEGER DEFAULT 1, -- how many times visited in this session
+          transition_type TEXT, -- typed, link, bookmark, auto_bookmark, auto_subframe, etc.
+          visit_duration INTEGER, -- milliseconds spent on page (if available)
+          referrer_url TEXT, -- where we came from
+          is_organic BOOLEAN DEFAULT 1, -- 1 = natural browsing, 0 = automated/intentional
+          sync_status TEXT DEFAULT 'new', -- new, processed, ignored
+          created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+          metadata TEXT -- JSON for browser-specific data
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_browsing_history_url ON browsing_history(url);
+        CREATE INDEX IF NOT EXISTS idx_browsing_history_visit_time ON browsing_history(visit_time);
+        CREATE INDEX IF NOT EXISTS idx_browsing_history_organic ON browsing_history(is_organic);
+        CREATE INDEX IF NOT EXISTS idx_browsing_history_sync_status ON browsing_history(sync_status);
       `;
 
       this.db.exec(sql, (err) => {
@@ -908,6 +929,191 @@ export class Database {
           }
         }
       );
+    });
+  }
+
+  // Browsing History Methods
+  async saveBrowsingHistory(historyData) {
+    return new Promise((resolve, reject) => {
+      const sql = `
+        INSERT OR IGNORE INTO browsing_history 
+        (url, title, visit_time, browser, visit_count, transition_type, 
+         visit_duration, referrer_url, is_organic, metadata)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `;
+      
+      const values = [
+        historyData.url,
+        historyData.title || null,
+        historyData.visit_time,
+        historyData.browser || 'unknown',
+        historyData.visit_count || 1,
+        historyData.transition_type || null,
+        historyData.visit_duration || null,
+        historyData.referrer_url || null,
+        historyData.is_organic !== false ? 1 : 0, // default to organic
+        JSON.stringify(historyData.metadata || {})
+      ];
+
+      this.db.run(sql, values, function(err) {
+        if (err) {
+          reject(err);
+        } else {
+          resolve(this.lastID);
+        }
+      });
+    });
+  }
+
+  async bulkSaveBrowsingHistory(historyArray) {
+    return new Promise((resolve, reject) => {
+      const sql = `
+        INSERT OR IGNORE INTO browsing_history 
+        (url, title, visit_time, browser, visit_count, transition_type, 
+         visit_duration, referrer_url, is_organic, metadata)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `;
+
+      this.db.serialize(() => {
+        const stmt = this.db.prepare(sql);
+        let savedCount = 0;
+        
+        for (const historyData of historyArray) {
+          const values = [
+            historyData.url,
+            historyData.title || null,
+            historyData.visit_time,
+            historyData.browser || 'unknown',
+            historyData.visit_count || 1,
+            historyData.transition_type || null,
+            historyData.visit_duration || null,
+            historyData.referrer_url || null,
+            historyData.is_organic !== false ? 1 : 0,
+            JSON.stringify(historyData.metadata || {})
+          ];
+          
+          stmt.run(values, function(err) {
+            if (!err && this.changes > 0) {
+              savedCount++;
+            }
+          });
+        }
+        
+        stmt.finalize((err) => {
+          if (err) {
+            reject(err);
+          } else {
+            resolve(savedCount);
+          }
+        });
+      });
+    });
+  }
+
+  async getBrowsingHistory(options = {}) {
+    return new Promise((resolve, reject) => {
+      const {
+        limit = 100,
+        since = null,
+        until = null,
+        browser = null,
+        organic_only = null,
+        sync_status = null,
+        url_pattern = null
+      } = options;
+
+      let sql = `
+        SELECT * FROM browsing_history 
+        WHERE 1=1
+      `;
+      const params = [];
+
+      if (since) {
+        sql += ' AND visit_time >= ?';
+        params.push(since);
+      }
+
+      if (until) {
+        sql += ' AND visit_time <= ?';
+        params.push(until);
+      }
+
+      if (browser) {
+        sql += ' AND browser = ?';
+        params.push(browser);
+      }
+
+      if (organic_only !== null) {
+        sql += ' AND is_organic = ?';
+        params.push(organic_only ? 1 : 0);
+      }
+
+      if (sync_status) {
+        sql += ' AND sync_status = ?';
+        params.push(sync_status);
+      }
+
+      if (url_pattern) {
+        sql += ' AND url LIKE ?';
+        params.push(`%${url_pattern}%`);
+      }
+
+      sql += ' ORDER BY visit_time DESC LIMIT ?';
+      params.push(limit);
+
+      this.db.all(sql, params, (err, rows) => {
+        if (err) {
+          reject(err);
+        } else {
+          // Parse metadata JSON
+          const processed = rows.map(row => ({
+            ...row,
+            is_organic: Boolean(row.is_organic),
+            metadata: row.metadata ? JSON.parse(row.metadata) : {}
+          }));
+          resolve(processed);
+        }
+      });
+    });
+  }
+
+  async updateBrowsingHistoryStatus(ids, status) {
+    return new Promise((resolve, reject) => {
+      const placeholders = ids.map(() => '?').join(',');
+      const sql = `UPDATE browsing_history SET sync_status = ? WHERE id IN (${placeholders})`;
+      
+      this.db.run(sql, [status, ...ids], function(err) {
+        if (err) {
+          reject(err);
+        } else {
+          resolve(this.changes);
+        }
+      });
+    });
+  }
+
+  async getBrowsingStats(days = 7) {
+    return new Promise((resolve, reject) => {
+      const sql = `
+        SELECT 
+          browser,
+          COUNT(*) as visit_count,
+          COUNT(DISTINCT url) as unique_urls,
+          AVG(visit_duration) as avg_duration,
+          MIN(visit_time) as first_visit,
+          MAX(visit_time) as last_visit
+        FROM browsing_history 
+        WHERE visit_time >= datetime('now', '-${days} days')
+        GROUP BY browser
+      `;
+
+      this.db.all(sql, [], (err, rows) => {
+        if (err) {
+          reject(err);
+        } else {
+          resolve(rows);
+        }
+      });
     });
   }
 

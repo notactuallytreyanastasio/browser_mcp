@@ -5,6 +5,7 @@ import { chromium } from 'playwright';
 import { CommandProcessor } from './command-processor.js';
 import { Database } from './database.js';
 import { SessionManager } from './session-manager.js';
+import { BrowserHistoryMonitor } from './tools/browser-history-monitor.js';
 import fs from 'fs/promises';
 import path from 'path';
 import { fileURLToPath } from 'url';
@@ -29,6 +30,7 @@ class BrowserMCPServer {
     this.database = new Database();
     this.commandProcessor = new CommandProcessor(this);
     this.sessionManager = new SessionManager();
+    this.historyMonitor = new BrowserHistoryMonitor(this.database);
     this.setupToolHandlers();
     this.initDatabase();
   }
@@ -555,6 +557,107 @@ class BrowserMCPServer {
             required: ['archive_id']
           },
         },
+        {
+          name: 'sync_browser_history',
+          description: 'Sync your browser history to capture natural browsing patterns',
+          inputSchema: {
+            type: 'object',
+            properties: {
+              browser: {
+                type: 'string',
+                enum: ['chrome', 'safari', 'arc', 'brave', 'chromeBeta', 'chromeCanary'],
+                description: 'Browser to sync from (default: chrome)',
+                default: 'chrome'
+              },
+              days: {
+                type: 'number',
+                description: 'Number of days back to sync (default: 7)',
+                default: 7
+              },
+              dry_run: {
+                type: 'boolean',
+                description: 'Preview what would be synced without saving (default: false)',
+                default: false
+              }
+            }
+          },
+        },
+        {
+          name: 'check_browser_availability',
+          description: 'Check which browsers are available for history monitoring',
+          inputSchema: {
+            type: 'object',
+            properties: {}
+          },
+        },
+        {
+          name: 'get_browsing_history',
+          description: 'Get your recent browsing history with filtering options',
+          inputSchema: {
+            type: 'object',
+            properties: {
+              limit: {
+                type: 'number',
+                description: 'Number of entries to return (default: 50)',
+                default: 50
+              },
+              hours: {
+                type: 'number',
+                description: 'Hours back to search (default: 24)',
+                default: 24
+              },
+              organic_only: {
+                type: 'boolean',
+                description: 'Only show organic browsing, not automated visits (default: true)',
+                default: true
+              },
+              browser: {
+                type: 'string',
+                description: 'Filter by specific browser'
+              },
+              url_pattern: {
+                type: 'string',
+                description: 'Filter URLs containing this text'
+              }
+            }
+          },
+        },
+        {
+          name: 'analyze_browsing_patterns',
+          description: 'Analyze your browsing patterns to understand interests and habits',
+          inputSchema: {
+            type: 'object',
+            properties: {
+              days: {
+                type: 'number',
+                description: 'Number of days to analyze (default: 7)',
+                default: 7
+              }
+            }
+          },
+        },
+        {
+          name: 'find_unvisited_gems',
+          description: 'Find interesting links from your browsing that you might want to revisit',
+          inputSchema: {
+            type: 'object',
+            properties: {}
+          },
+        },
+        {
+          name: 'get_browsing_stats',
+          description: 'Get statistics about your browsing activity',
+          inputSchema: {
+            type: 'object',
+            properties: {
+              days: {
+                type: 'number',
+                description: 'Number of days to analyze (default: 7)',
+                default: 7
+              }
+            }
+          },
+        },
       ],
     }));
 
@@ -660,6 +763,24 @@ class BrowserMCPServer {
           
           case 'browse_archive':
             return await this.browseArchive(args.archive_id, args.show_resources !== false);
+          
+          case 'sync_browser_history':
+            return await this.syncBrowserHistory(args.browser || 'chrome', args.days || 7, args.dry_run || false);
+          
+          case 'check_browser_availability':
+            return await this.checkBrowserAvailability();
+          
+          case 'get_browsing_history':
+            return await this.getBrowsingHistory(args);
+          
+          case 'analyze_browsing_patterns':
+            return await this.analyzeBrowsingPatterns(args.days || 7);
+          
+          case 'find_unvisited_gems':
+            return await this.findUnvisitedGems();
+          
+          case 'get_browsing_stats':
+            return await this.getBrowsingStats(args.days || 7);
           
           default:
             throw new Error(`Unknown tool: ${name}`);
@@ -4324,6 +4445,337 @@ The page has been fully archived with all resources for offline viewing.`
     
     await calculateSize(dirPath);
     return totalSize;
+  }
+
+  // Browser History Methods
+  async syncBrowserHistory(browser = 'chrome', days = 7, dryRun = false) {
+    try {
+      const since = new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString();
+      
+      const result = await this.historyMonitor.syncBrowserHistory(browser, {
+        since,
+        limit: 5000,
+        dryRun
+      });
+
+      const message = dryRun 
+        ? `🔍 **Browser History Preview** (${browser})
+
+Found ${result.found} entries from the last ${days} days.
+
+**Sample entries:**
+${result.sample.map((entry, i) => 
+  `${i + 1}. ${entry.title || 'Untitled'}
+   🔗 ${entry.url}
+   🕐 ${entry.visit_time}`
+).join('\n\n')}
+
+Run without dry_run=true to save these entries to your link garden.`
+        : `🌱 **Browser History Synced** (${browser})
+
+📊 Found: ${result.found} entries
+💾 Saved: ${result.saved} new entries
+📅 Period: Last ${days} days
+🕐 Last synced: ${result.lastSynced}
+
+Your natural browsing patterns are now part of your link garden! These entries are marked as "organic browsing" to distinguish them from your curated links.`;
+
+      return {
+        content: [{
+          type: 'text',
+          text: message
+        }]
+      };
+
+    } catch (error) {
+      return {
+        content: [{
+          type: 'text',
+          text: `❌ Browser history sync failed: ${error.message}
+
+**Common solutions:**
+- Make sure ${browser} is completely closed
+- Enable "Full Disk Access" for Terminal in System Preferences > Privacy & Security
+- Try a different browser if this one isn't available`
+        }]
+      };
+    }
+  }
+
+  async checkBrowserAvailability() {
+    try {
+      const available = await this.historyMonitor.checkBrowserAvailability();
+      
+      const browserList = Object.entries(available).map(([name, config]) => 
+        `✅ **${name}** - ${config.history}`
+      ).join('\n');
+
+      const message = Object.keys(available).length > 0 
+        ? `🔍 **Available Browsers for History Monitoring**
+
+${browserList}
+
+**To sync history:**
+\`sync_browser_history\` with browser parameter (e.g., "chrome", "safari", "arc")
+
+**Note:** Make sure the browser is closed before syncing to avoid database locks.`
+        : `❌ **No browsers available for monitoring**
+
+This could mean:
+- No supported browsers are installed
+- Browser history files aren't accessible
+- You need "Full Disk Access" permission
+
+**Supported browsers:** Chrome, Safari, Arc, Brave, Chrome Beta, Chrome Canary`;
+
+      return {
+        content: [{
+          type: 'text',
+          text: message
+        }]
+      };
+
+    } catch (error) {
+      return {
+        content: [{
+          type: 'text',
+          text: `❌ Browser availability check failed: ${error.message}`
+        }]
+      };
+    }
+  }
+
+  async getBrowsingHistory(options = {}) {
+    try {
+      const {
+        limit = 50,
+        hours = 24,
+        organic_only = true,
+        browser = null,
+        url_pattern = null
+      } = options;
+
+      const since = new Date(Date.now() - hours * 60 * 60 * 1000).toISOString();
+      
+      const history = await this.database.getBrowsingHistory({
+        limit,
+        since,
+        organic_only,
+        browser,
+        url_pattern
+      });
+
+      if (history.length === 0) {
+        return {
+          content: [{
+            type: 'text',
+            text: `No browsing history found for the specified criteria.
+
+Try:
+- Syncing browser history first with \`sync_browser_history\`
+- Expanding the time range (increase hours parameter)
+- Removing filters to see all entries`
+          }]
+        };
+      }
+
+      const historyList = history.map((entry, i) => {
+        const timeAgo = this.getTimeAgo(new Date(entry.visit_time));
+        const browserBadge = entry.browser ? `[${entry.browser}]` : '';
+        const organicBadge = entry.is_organic ? '🌱' : '🤖';
+        
+        return `${i + 1}. ${organicBadge} **${entry.title || 'Untitled'}** ${browserBadge}
+   🔗 ${entry.url}
+   🕐 ${timeAgo}`;
+      }).join('\n\n');
+
+      return {
+        content: [{
+          type: 'text',
+          text: `🕐 **Your Recent Browsing Activity** (${history.length} entries)
+
+${historyList}
+
+🌱 = Organic browsing | 🤖 = Automated/intentional
+Use \`analyze_browsing_patterns\` to see insights about your browsing habits.`
+        }]
+      };
+
+    } catch (error) {
+      return {
+        content: [{
+          type: 'text',
+          text: `❌ Failed to get browsing history: ${error.message}`
+        }]
+      };
+    }
+  }
+
+  async analyzeBrowsingPatterns(days = 7) {
+    try {
+      const patterns = await this.historyMonitor.analyzeBrowsingPatterns(days);
+      
+      const topDomainsText = patterns.topDomains.map(([domain, count]) => 
+        `• ${domain}: ${count} visits`
+      ).join('\n');
+
+      const activeHoursText = patterns.mostActiveHours.map(([hour, count]) => 
+        `• ${hour}:00 - ${count} visits`
+      ).join('\n');
+
+      const referrerText = patterns.topReferrerPaths.slice(0, 5).map(([path, count]) => 
+        `• ${path}: ${count} times`
+      ).join('\n');
+
+      return {
+        content: [{
+          type: 'text',
+          text: `📊 **Your Browsing Patterns** (${days} days)
+
+**📈 Overview:**
+• Total visits: ${patterns.totalVisits}
+• Unique domains: ${patterns.topDomains.length}
+
+**🌐 Top Domains:**
+${topDomainsText}
+
+**⏰ Most Active Hours:**
+${activeHoursText}
+
+**🔄 Common Navigation Paths:**
+${referrerText}
+
+These patterns help understand your natural browsing habits vs intentional link discovery!`
+        }]
+      };
+
+    } catch (error) {
+      return {
+        content: [{
+          type: 'text',
+          text: `❌ Failed to analyze browsing patterns: ${error.message}`
+        }]
+      };
+    }
+  }
+
+  async findUnvisitedGems() {
+    try {
+      const gems = await this.historyMonitor.findInterestingUnvisitedLinks();
+      
+      if (gems.length === 0) {
+        return {
+          content: [{
+            type: 'text',
+            text: `💎 No unvisited gems found.
+
+This could mean:
+- Most of your browsing history is already in your link garden
+- Try syncing more browser history first
+- Your browsing hasn't included many article-type links recently
+
+Keep browsing and sync again later!`
+          }]
+        };
+      }
+
+      const gemsList = gems.map((gem, i) => {
+        const timeAgo = this.getTimeAgo(new Date(gem.visit_time));
+        return `${i + 1}. **${gem.title}**
+   🔗 ${gem.url}
+   👀 Visited ${gem.visit_count} time(s) | ${timeAgo}
+   📱 From: ${gem.browser}`;
+      }).join('\n\n');
+
+      return {
+        content: [{
+          type: 'text',
+          text: `💎 **Unvisited Gems from Your Browsing** (${gems.length} found)
+
+These are interesting links you've visited but haven't added to your curated collection:
+
+${gemsList}
+
+💡 Consider using \`save_link\` to add the interesting ones to your link garden!`
+        }]
+      };
+
+    } catch (error) {
+      return {
+        content: [{
+          type: 'text',
+          text: `❌ Failed to find unvisited gems: ${error.message}`
+        }]
+      };
+    }
+  }
+
+  async getBrowsingStats(days = 7) {
+    try {
+      const stats = await this.database.getBrowsingStats(days);
+      
+      if (stats.length === 0) {
+        return {
+          content: [{
+            type: 'text',
+            text: `📊 No browsing statistics available for the last ${days} days.
+
+Try syncing your browser history first with \`sync_browser_history\`.`
+          }]
+        };
+      }
+
+      const statsText = stats.map(stat => {
+        const avgDuration = stat.avg_duration ? `${Math.round(stat.avg_duration / 1000)}s avg` : 'No duration data';
+        return `📱 **${stat.browser}**
+   • ${stat.visit_count} total visits
+   • ${stat.unique_urls} unique URLs  
+   • ${avgDuration}
+   • Active: ${new Date(stat.first_visit).toLocaleDateString()} - ${new Date(stat.last_visit).toLocaleDateString()}`;
+      }).join('\n\n');
+
+      const totalVisits = stats.reduce((sum, stat) => sum + stat.visit_count, 0);
+      const totalUnique = stats.reduce((sum, stat) => sum + stat.unique_urls, 0);
+
+      return {
+        content: [{
+          type: 'text',
+          text: `📊 **Browsing Statistics** (${days} days)
+
+**🌍 Overall:**
+• ${totalVisits} total visits across all browsers
+• ${totalUnique} unique URLs visited
+
+${statsText}
+
+Use \`analyze_browsing_patterns\` for deeper insights into your browsing habits!`
+        }]
+      };
+
+    } catch (error) {
+      return {
+        content: [{
+          type: 'text',
+          text: `❌ Failed to get browsing stats: ${error.message}`
+        }]
+      };
+    }
+  }
+
+  getTimeAgo(date) {
+    const now = new Date();
+    const diffMs = now - date;
+    const diffMins = Math.floor(diffMs / 60000);
+    const diffHours = Math.floor(diffMs / 3600000);
+    const diffDays = Math.floor(diffMs / 86400000);
+
+    if (diffMins < 60) {
+      return `${diffMins}m ago`;
+    } else if (diffHours < 24) {
+      return `${diffHours}h ago`;
+    } else {
+      return `${diffDays}d ago`;
+    }
   }
 
   async run() {

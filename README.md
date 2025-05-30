@@ -180,6 +180,28 @@ Claude can learn any website you show it!
 ### The Hobbyist
 *"Claude learned my gardening forums and craft sites. I collect project ideas, rate them by season and difficulty, and create 'inspiration lists' when I'm ready to start something new."*
 
+## 🔍 Part 6: Understanding Your Natural Browsing (Optional)
+
+Your link garden can also learn from your everyday browsing to understand your natural interests:
+
+**Enable browser history monitoring:**
+> "Can you check what browsers I have available for monitoring my browsing patterns?"
+
+**Sync your browsing history:**
+> "Sync my Chrome browsing history from the last week so you can see what I naturally browse"
+
+**Discover hidden gems:**
+> "Look through my browsing history and find interesting links I visited but haven't saved to my garden yet"
+
+**Understand your patterns:**
+> "Analyze my browsing patterns to show me what I'm naturally interested in"
+
+This creates two types of links in your garden:
+- 🌱 **Organic browsing** - Things you naturally discovered while browsing
+- ⭐ **Curated links** - Things you intentionally chose to save
+
+**Privacy Note:** All browsing data stays completely on your computer. This feature requires "Full Disk Access" permission and works best when your browser is closed during sync.
+
 ## Growing Your Garden Over Time
 
 Think of this as tending a real garden:
