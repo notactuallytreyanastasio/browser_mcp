@@ -93,6 +93,31 @@ export class Database {
           metadata TEXT, -- JSONB metadata for analytics (comments, authors, categories, etc.)
           UNIQUE(url) -- prevent duplicate URLs
         );
+
+        CREATE TABLE IF NOT EXISTS archives (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          link_id INTEGER,
+          url TEXT NOT NULL,
+          title TEXT,
+          archive_path TEXT, -- local file path to archive
+          archive_format TEXT, -- mhtml, directory, warc, pdf
+          archive_size INTEGER, -- size in bytes
+          archived_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+          content_type TEXT, -- webpage, article, email
+          screenshot_path TEXT, -- path to screenshot
+          archive_metadata TEXT, -- JSON: resources, timing, etc.
+          FOREIGN KEY (link_id) REFERENCES links (id)
+        );
+
+        CREATE TABLE IF NOT EXISTS archive_resources (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          archive_id INTEGER,
+          resource_type TEXT, -- css, js, image, font, other
+          original_url TEXT,
+          local_path TEXT,
+          file_size INTEGER,
+          FOREIGN KEY (archive_id) REFERENCES archives (id)
+        );
       `;
 
       this.db.exec(sql, (err) => {
@@ -604,17 +629,17 @@ export class Database {
 
   async runMigrations() {
     return new Promise((resolve, reject) => {
-      // Check if metadata column exists
-      this.db.all("PRAGMA table_info(links)", [], (err, columns) => {
-        if (err) {
-          reject(err);
-          return;
-        }
-
-        const hasMetadata = columns.some(col => col.name === 'metadata');
-        const hasSavedAt = columns.some(col => col.name === 'saved_at');
-
+      // Check existing schema
+      Promise.all([
+        this.getTableInfo('links'),
+        this.getTableInfo('archives'),
+        this.getTableInfo('archive_resources')
+      ]).then(([linksColumns, archivesTable, resourcesTable]) => {
         const migrations = [];
+
+        // Check links table columns
+        const hasMetadata = linksColumns.some(col => col.name === 'metadata');
+        const hasSavedAt = linksColumns.some(col => col.name === 'saved_at');
 
         if (!hasMetadata) {
           migrations.push("ALTER TABLE links ADD COLUMN metadata TEXT");
@@ -624,43 +649,249 @@ export class Database {
           migrations.push("ALTER TABLE links ADD COLUMN saved_at DATETIME DEFAULT CURRENT_TIMESTAMP");
         }
 
+        // Check if archive tables exist
+        if (!archivesTable || archivesTable.length === 0) {
+          migrations.push(`
+            CREATE TABLE archives (
+              id INTEGER PRIMARY KEY AUTOINCREMENT,
+              link_id INTEGER,
+              url TEXT NOT NULL,
+              title TEXT,
+              archive_path TEXT,
+              archive_format TEXT,
+              archive_size INTEGER,
+              archived_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+              content_type TEXT,
+              screenshot_path TEXT,
+              archive_metadata TEXT,
+              FOREIGN KEY (link_id) REFERENCES links (id)
+            )
+          `);
+        }
+
+        if (!resourcesTable || resourcesTable.length === 0) {
+          migrations.push(`
+            CREATE TABLE archive_resources (
+              id INTEGER PRIMARY KEY AUTOINCREMENT,
+              archive_id INTEGER,
+              resource_type TEXT,
+              original_url TEXT,
+              local_path TEXT,
+              file_size INTEGER,
+              FOREIGN KEY (archive_id) REFERENCES archives (id)
+            )
+          `);
+        }
+
         if (migrations.length === 0) {
           resolve();
           return;
         }
 
         // Run migrations sequentially
-        let completed = 0;
-        migrations.forEach((migration, index) => {
-          this.db.run(migration, (err) => {
-            if (err) {
-              console.error(`Migration ${index + 1} failed:`, err.message);
-            } else {
-              console.error(`Migration ${index + 1} completed: ${migration}`);
-            }
-            
-            completed++;
-            if (completed === migrations.length) {
-              // If we added saved_at, backfill from extracted_at
-              if (!hasSavedAt) {
-                this.db.run(
-                  "UPDATE links SET saved_at = extracted_at WHERE saved_at IS NULL",
-                  (backfillErr) => {
-                    if (backfillErr) {
-                      console.error('Backfill failed:', backfillErr.message);
-                    } else {
-                      console.error('Backfilled saved_at from extracted_at');
-                    }
-                    resolve();
+        this.runMigrationsSequentially(migrations, !hasSavedAt)
+          .then(resolve)
+          .catch(reject);
+      }).catch(reject);
+    });
+  }
+
+  getTableInfo(tableName) {
+    return new Promise((resolve, reject) => {
+      this.db.all(`PRAGMA table_info(${tableName})`, [], (err, columns) => {
+        if (err) {
+          // Table might not exist, which is fine
+          resolve([]);
+        } else {
+          resolve(columns);
+        }
+      });
+    });
+  }
+
+  runMigrationsSequentially(migrations, needsBackfill) {
+    return new Promise((resolve, reject) => {
+      let completed = 0;
+      
+      migrations.forEach((migration, index) => {
+        this.db.run(migration, (err) => {
+          if (err) {
+            console.error(`Migration ${index + 1} failed:`, err.message);
+          } else {
+            console.error(`Migration ${index + 1} completed`);
+          }
+          
+          completed++;
+          if (completed === migrations.length) {
+            // If we added saved_at, backfill from extracted_at
+            if (needsBackfill) {
+              this.db.run(
+                "UPDATE links SET saved_at = extracted_at WHERE saved_at IS NULL",
+                (backfillErr) => {
+                  if (backfillErr) {
+                    console.error('Backfill failed:', backfillErr.message);
+                  } else {
+                    console.error('Backfilled saved_at from extracted_at');
                   }
-                );
-              } else {
-                resolve();
-              }
+                  resolve();
+                }
+              );
+            } else {
+              resolve();
             }
-          });
+          }
         });
       });
+    });
+  }
+
+  async saveArchive(archiveData) {
+    const {
+      linkId = null,
+      url,
+      title,
+      archivePath,
+      archiveFormat,
+      archiveSize,
+      contentType = 'webpage',
+      screenshotPath = null,
+      archiveMetadata = null,
+      resources = []
+    } = archiveData;
+
+    return new Promise((resolve, reject) => {
+      // Insert archive record
+      this.db.run(
+        `INSERT INTO archives 
+         (link_id, url, title, archive_path, archive_format, archive_size, content_type, screenshot_path, archive_metadata)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [
+          linkId,
+          url,
+          title,
+          archivePath,
+          archiveFormat,
+          archiveSize,
+          contentType,
+          screenshotPath,
+          archiveMetadata ? JSON.stringify(archiveMetadata) : null
+        ],
+        function(err) {
+          if (err) {
+            reject(err);
+            return;
+          }
+
+          const archiveId = this.lastID;
+          console.error(`Archive saved with ID: ${archiveId}`);
+
+          // Save resources if provided
+          if (resources.length > 0) {
+            const resourcePromises = resources.map(resource => {
+              return new Promise((resolveResource, rejectResource) => {
+                this.db.run(
+                  `INSERT INTO archive_resources 
+                   (archive_id, resource_type, original_url, local_path, file_size)
+                   VALUES (?, ?, ?, ?, ?)`,
+                  [
+                    archiveId,
+                    resource.type,
+                    resource.originalUrl,
+                    resource.localPath,
+                    resource.fileSize
+                  ],
+                  (resourceErr) => {
+                    if (resourceErr) {
+                      rejectResource(resourceErr);
+                    } else {
+                      resolveResource();
+                    }
+                  }
+                );
+              });
+            });
+
+            Promise.all(resourcePromises)
+              .then(() => resolve(archiveId))
+              .catch(reject);
+          } else {
+            resolve(archiveId);
+          }
+        }
+      );
+    });
+  }
+
+  async getArchives(filters = {}) {
+    const { limit = 50, contentType = null, hasScreenshot = null } = filters;
+    
+    let query = `
+      SELECT a.*, l.title as link_title, l.tags 
+      FROM archives a 
+      LEFT JOIN links l ON a.link_id = l.id 
+      WHERE 1=1
+    `;
+    const params = [];
+
+    if (contentType) {
+      query += ` AND a.content_type = ?`;
+      params.push(contentType);
+    }
+
+    if (hasScreenshot !== null) {
+      if (hasScreenshot) {
+        query += ` AND a.screenshot_path IS NOT NULL`;
+      } else {
+        query += ` AND a.screenshot_path IS NULL`;
+      }
+    }
+
+    query += ` ORDER BY a.archived_at DESC LIMIT ?`;
+    params.push(limit);
+
+    return new Promise((resolve, reject) => {
+      this.db.all(query, params, (err, rows) => {
+        if (err) {
+          reject(err);
+        } else {
+          resolve(rows);
+        }
+      });
+    });
+  }
+
+  async getArchiveById(archiveId) {
+    return new Promise((resolve, reject) => {
+      this.db.get(
+        `SELECT a.*, l.title as link_title, l.url as link_url, l.tags 
+         FROM archives a 
+         LEFT JOIN links l ON a.link_id = l.id 
+         WHERE a.id = ?`,
+        [archiveId],
+        (err, row) => {
+          if (err) {
+            reject(err);
+          } else {
+            resolve(row);
+          }
+        }
+      );
+    });
+  }
+
+  async getArchiveResources(archiveId) {
+    return new Promise((resolve, reject) => {
+      this.db.all(
+        `SELECT * FROM archive_resources WHERE archive_id = ? ORDER BY resource_type, original_url`,
+        [archiveId],
+        (err, rows) => {
+          if (err) {
+            reject(err);
+          } else {
+            resolve(rows);
+          }
+        }
+      );
     });
   }
 
