@@ -7,9 +7,12 @@
   "scripts": {
     "build": "tsc",
     "start": "npm run build && node dist/index.js",
+    "start:playwright": "node src/index-playwright.ts",
+    "start:legacy": "node src/index.js",
     "dev": "tsc --watch & node --watch dist/index.js",
-    "start:js": "node src/index.js",
-    "type-check": "tsc --noEmit"
+    "dev:playwright": "npm run build && node --watch dist/index-playwright.js",
+    "type-check": "tsc --noEmit",
+    "install:playwright-mcp": "npm install -g @microsoft/playwright-mcp"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.0.0",

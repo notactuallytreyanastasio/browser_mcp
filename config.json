@@ -1,15 +1,66 @@
 {
+  "name": "intelligent-content-discovery",
+  "version": "1.0.0",
+  "description": "AI-powered content discovery with intelligent pattern learning",
+  
   "database": {
     "path": "/Users/robertgrayson/playground/luke_fun/browser_patterns.db",
-    "description": "SQLite database file to store learned browser patterns"
+    "description": "SQLite database file to store learned browser patterns",
+    "backup_frequency": "daily",
+    "max_backup_count": 7
   },
+  
   "browser": {
     "headless": false,
     "slowMo": 200,
     "userAgent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
   },
+  
+  "playwright_mcp": {
+    "server_command": "npx",
+    "server_args": ["@microsoft/playwright-mcp"],
+    "browser": "chromium",
+    "headless": true,
+    "viewport": {
+      "width": 1280,
+      "height": 720
+    }
+  },
+  
   "learning": {
     "maxPatterns": 100,
-    "autoBackup": true
+    "autoBackup": true,
+    "confidence_threshold": 0.8,
+    "max_patterns_per_site": 10,
+    "auto_validate": true,
+    "validation_sample_size": 3
+  },
+  
+  "content_discovery": {
+    "default_extraction_delay": 1000,
+    "max_concurrent_extractions": 3,
+    "respect_robots_txt": true,
+    "user_agent": "IntelligentContentDiscovery/1.0 (Learning Mode)"
+  },
+  
+  "archive": {
+    "default_format": "directory",
+    "include_screenshots": true,
+    "max_file_size": "100MB",
+    "compression": true
+  },
+  
+  "logging": {
+    "level": "info",
+    "file": "./logs/discovery.log",
+    "max_file_size": "10MB",
+    "max_files": 5
+  },
+  
+  "features": {
+    "learning_mode": true,
+    "auto_pattern_validation": true,
+    "content_deduplication": true,
+    "smart_rate_limiting": true
   }
 }
