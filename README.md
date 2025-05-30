@@ -1,349 +1,204 @@
-# Browser MCP Control Server with Link Curation
+# Personal Link Garden 🌱
 
-A powerful MCP server that automatically finds, extracts, and curates stories from multiple websites. Build your own personal knowledge base by collecting stories from Reddit, Hacker News, and any site you want to monitor.
+A tool for Claude Desktop that helps you collect, organize, and curate interesting links from around the web. Think of it as your personal digital garden where you can grow a collection of meaningful content.
 
-## 🎯 **Key Features**
+## What This Does
 
-- **Multi-site story extraction** - Get stories from Reddit, Hacker News, and custom sites
-- **Automatic link saving** - All extracted links saved to SQLite database  
-- **Smart curation** - Rate, tag, and organize your favorite stories
-- **Natural language queries** - Ask questions about your saved content in plain English
-- **Site learning** - Teach the system to extract from any website
-- **Personal story feed** - Build your own curated news feed
+Instead of bookmarking links randomly or losing track of interesting articles, this tool helps Claude learn how you browse and what you care about. Once Claude understands your patterns, it can help you collect and organize links automatically.
 
----
+## What You Need
 
-## 🚀 **Complete Setup Guide**
+- Claude Desktop (which you already have!)
+- About 10 minutes to set up
+- No technical experience required!
 
-### **Prerequisites**
-1. **Claude Desktop** - Install from [Claude Desktop](https://claude.ai/desktop)
-2. **Node.js** - Version 18+ required
-3. **Git** - For cloning the repository
+## Quick Setup
 
-### **Installation**
-```bash
-# Clone the repository
-git clone <your-repo-url>
-cd luke_fun
+### Step 1: Get the Tool Ready
 
-# Install dependencies
-npm install
+1. **Download this folder** to your computer
+2. **Open Terminal** (don't worry, we'll keep it simple!)
+   - On Mac: Press Cmd+Space, type "Terminal", press Enter
+   - On Windows: Press Windows key, type "Command Prompt", press Enter
+3. **Go to the folder** where you downloaded this:
+   ```
+   cd Downloads/luke_fun
+   ```
+4. **Install it**:
+   ```
+   npm install
+   ```
 
-# Install Playwright browsers
-npx playwright install chromium
-```
+### Step 2: Connect to Claude Desktop
 
-### **Configure Claude Desktop**
-Add this to your Claude Desktop config file:
-
-**macOS:** `~/Library/Application Support/Claude/claude_desktop_config.json`
-**Windows:** `%APPDATA%\Claude\claude_desktop_config.json`
+1. **Open Claude Desktop**
+2. **Go to Settings** (gear icon)
+3. **Find "MCP Servers"** section
+4. **Add this configuration**:
 
 ```json
 {
   "mcpServers": {
-    "browser-automation": {
-      "command": "/usr/local/bin/node",
-      "args": ["/path/to/luke_fun/src/index.js"],
-      "cwd": "/path/to/luke_fun"
+    "personal-link-garden": {
+      "command": "node",
+      "args": ["src/index.js"],
+      "env": {}
     }
   }
 }
 ```
 
-### **Start Using**
-1. Restart Claude Desktop
-2. You'll see new tools available in Claude
-3. Start with: `test_browser_health` to verify everything works
+5. **Restart Claude Desktop**
 
----
+### Step 3: Test It
 
-## 📰 **Story Collection Guide**
+Open a new chat in Claude Desktop and ask:
 
-### **Step 1: Quick Story Collection**
+> "Do you see my personal link garden tools? Can you help me get started?"
 
-**Get stories from popular sites:**
-```
-Get the top 10 stories from /r/technology and hacker news
-```
+If Claude says yes, you're ready to go! 🎉
 
-**Get stories from specific subreddits:**
-```
-Get the top 5 stories from /r/programming /r/webdev /r/javascript
-```
+## How to Use Your Link Garden
 
-**Supported sites out of the box:**
-- **Reddit**: Use `/r/subreddit` format (e.g., `/r/technology`, `/r/news`)
-- **Hacker News**: Use `hacker news` or `news.ycombinator.com`
+### 🎓 Part 1: Teaching Claude Your Browsing Style
 
-### **Step 2: Learn New Sites**
+The magic happens when you show Claude how YOU like to browse websites. Let's start with Reddit:
 
-**To extract from any website:**
+**Say to Claude:**
+> "I want to teach you how I browse Reddit. Can you help me start a learning session for the Reddit front page?"
 
-1. **Open visual browser:**
-   ```
-   Use open_visual_browser with url: "https://example-news-site.com"
-   ```
+Claude will guide you through:
+1. **Opening a browser** to Reddit
+2. **Starting learning mode** so it can watch what you do
+3. **Showing what matters to you** - click on story titles, vote scores, whatever you care about
+4. **Analyzing your pattern** so Claude remembers for next time
 
-2. **Start learning mode:**
-   ```
-   Use start_learning_mode with pattern_name: "example_news_stories"
-   ```
+**When you're done, say:**
+> "Okay, I think you understand how I browse Reddit. Can you remember this pattern so you can help me collect stories later?"
 
-3. **Click on story titles** in the browser window - they'll highlight in red
+### 🌐 Part 2: Getting Stories Automatically
 
-4. **Save the pattern:**
-   ```
-   Use extract_learned_elements with pattern_name: "example_news_stories"
-   ```
+Once Claude knows your pattern:
 
-5. **Use your new pattern:**
-   ```
-   Get the top 10 stories from https://example-news-site.com
-   ```
+> "Can you check Reddit using the pattern I taught you and bring me back 10 interesting stories?"
 
-### **Step 3: View Your Collected Stories**
+Claude will browse Reddit exactly the way you showed it and return a neat list of stories for you to look through.
 
-**See all recent stories:**
-```
-Use query_links with limit: 20
-```
+**You can also try:**
+- "Get me stories from the programming subreddit"
+- "Check Hacker News for interesting tech articles"
+- "Look for cooking content on Reddit"
 
-**Filter by source:**
-```
-Use query_links with source_site: "news.ycombinator.com", limit: 10
-```
+### 🏷️ Part 3: Organizing Your Collection
 
-**Search content:**
-```
-Use query_links with search_text: "AI", limit: 15
-```
+As you collect links, you'll want to organize the good ones:
 
----
-
-## 🎯 **Story Curation Workflow**
-
-### **1. Collect Stories**
-```
-Get the top 15 stories from /r/technology /r/programming and hacker news
-```
-→ Stories automatically saved to database
-
-### **2. Review Your Collection**
-```
-Use query_links with limit: 30
-```
-→ Browse through your saved stories
-
-### **3. Curate the Best Ones**
-
-**Rate a story highly:**
-```
-Use curate_link with link_id: 5, score: 5, tags: ["must-read", "ai"]
-```
+**Rate something you loved:**
+> "I really liked that article about gardening. Give it 5 stars and tag it as 'gardening' and 'weekend-project'"
 
 **Add personal notes:**
-```
-Use curate_link with link_id: 12, score: 4, tags: ["tutorial"], notes: "Great explanation of React hooks"
-```
+> "For that recipe link, add a note: 'Mom would love this - try for her birthday dinner'"
 
-**Mark for sharing:**
-```
-Use curate_link with link_id: 8, score: 5, is_public: true, tags: ["team-share"]
-```
+**Mark favorites:**
+> "Mark that travel article as curated - it's definitely a keeper"
 
-### **4. Create Your Personal Feed**
+**Find things later:**
+> "Show me all my 5-star cooking articles"
+> "What articles did I save about travel last month?"
 
-**Natural language queries:**
-```
-Use query_with_natural_language with description: "Show me my highest rated AI-related links from Hacker News"
-```
+### 📖 Part 4: Creating Beautiful Reading Lists
 
-**Custom SQL queries:**
-```
-Use execute_sql with query: "SELECT title, url, score FROM links WHERE score >= 4 ORDER BY score DESC"
-```
+When you want a nice collection to read:
 
----
+> "Make me a weekend reading list with about 8 of my favorite recent articles"
 
-## 🔍 **Finding and Organizing Content**
+Claude will create a beautiful HTML page with your best links, formatted perfectly for reading on your phone, tablet, or computer.
 
-### **Natural Language Search**
+### 📊 Part 5: Watching Your Garden Grow
 
-Ask questions about your content in plain English:
+See what you've been collecting:
 
-- `"Show me my highest rated programming articles"`
-- `"What are my recent links about AI?"`
-- `"How many curated links do I have?"`
-- `"Find links from Reddit about web development"`
-- `"Show me public links I've shared"`
+> "Show me a visual map of all my interests based on the links I've saved"
 
-### **Advanced Filtering**
+This creates a colorful "tag cloud" showing your reading patterns and interests over time.
 
-**By rating:**
-```
-Use query_links with min_score: 4
-```
+## If Something Goes Wrong
 
-**By tags:**
-```
-Use query_links with tags: ["ai", "programming"]
-```
+### Reddit Won't Let You In?
 
-**Curated only:**
-```
-Use query_links with is_curated: true
-```
+Sometimes Reddit blocks automated browsing. Just say:
 
-**Public shares:**
-```
-Use query_links with is_public: true
-```
+> "Reddit seems to be blocking us. Can you try the backup method?"
 
-### **SQL Power Queries**
+Claude will switch to a gentler approach that works better with Reddit's rules.
 
-**Top sources:**
-```sql
-SELECT source_site, COUNT(*) as story_count 
-FROM links 
-GROUP BY source_site 
-ORDER BY story_count DESC;
-```
+### Confused About What You Can Do?
 
-**Reading trends:**
-```sql
-SELECT DATE(extracted_at) as date, COUNT(*) as stories_saved 
-FROM links 
-WHERE extracted_at >= date('now', '-7 days') 
-GROUP BY DATE(extracted_at) 
-ORDER BY date;
-```
+> "What can you help me do with my link garden?"
 
-**Best curated content:**
-```sql
-SELECT title, url, score, tags 
-FROM links 
-WHERE is_curated = 1 AND score >= 4 
-ORDER BY score DESC, curated_at DESC;
-```
+Claude will explain all the available features in simple terms.
 
----
+### Want to Start Over?
 
-## 🛠️ **Complete Tool Reference**
+> "Can you help me learn a completely different website, like a news site I like?"
 
-### **Story Collection**
-- **`get_top_stories_multi`** - Extract from multiple sites at once
-- **`open_visual_browser`** - Open browser to learn new sites
-- **`start_learning_mode`** - Begin teaching extraction patterns
-- **`extract_learned_elements`** - Save learned patterns
-- **`apply_saved_pattern`** - Use saved patterns for extraction
+Claude can learn any website you show it!
 
-### **Content Management**
-- **`query_links`** - Search and filter your saved stories
-- **`curate_link`** - Rate, tag, and organize individual stories
-- **`query_with_natural_language`** - Ask questions in plain English
-- **`execute_sql`** - Run custom database queries
-- **`get_database_schema`** - View database structure
+## What Makes This Special
 
-### **System Management**
-- **`test_browser_health`** - Verify system is working
-- **`get_session_stats`** - View automation statistics
-- **`list_all_patterns`** - See all learned site patterns
+### 🧠 It Learns YOUR Preferences
+- You teach Claude exactly what parts of websites matter to YOU
+- Your patterns are completely personal
+- No two gardens are alike
 
----
+### 🌱 It Grows With You
+- The more you use it, the better it gets
+- You can teach it new websites anytime
+- It remembers everything you've shown it
 
-## 📈 **Example Workflows**
+### 🏡 It's Completely Private
+- Everything stays on your computer
+- No data is shared anywhere
+- It's your personal digital space
 
-### **Daily News Curator**
-```bash
-# Morning: Collect fresh stories
-Get the top 20 stories from /r/technology /r/programming and hacker news
+### 🎯 It Stays Focused
+- Not about consuming more content
+- About thoughtfully collecting what matters
+- Quality over quantity, always
 
-# Review your collection
-Use query_links with limit: 30
+## Real Examples of How People Use It
 
-# Curate the best ones
-Use curate_link with link_id: 15, score: 5, tags: ["daily-read"]
+### The Curious Learner
+*"I taught Claude how I browse educational YouTube channels and science blogs. Now it helps me find interesting documentaries and research articles. I rate them and create weekend learning lists."*
 
-# Evening: Review your curated feed
-Use query_with_natural_language with description: "Show me today's highest rated stories"
-```
+### The Recipe Collector
+*"Claude learned how I browse food blogs and cooking subreddits. It finds great recipes for me, and I tag them by meal type and difficulty. Now I have my own searchable cookbook!"*
 
-### **Research Assistant**
-```bash
-# Collect from specialized sources
-Get the top 10 stories from /r/MachineLearning /r/artificial
+### The Tech Enthusiast  
+*"I showed Claude my favorite programming blogs and GitHub trending pages. It helps me stay current with tech trends and I curate the best tutorials for later reference."*
 
-# Search your archive
-Use query_with_natural_language with description: "Find all my AI research links with high ratings"
+### The Hobbyist
+*"Claude learned my gardening forums and craft sites. I collect project ideas, rate them by season and difficulty, and create 'inspiration lists' when I'm ready to start something new."*
 
-# Export for sharing
-Use execute_sql with query: "SELECT title, url FROM links WHERE tags LIKE '%research%' AND is_public = 1"
-```
+## Growing Your Garden Over Time
 
-### **Content Discovery**
-```bash
-# Learn a new site
-Use open_visual_browser with url: "https://dev.to"
-Use start_learning_mode with pattern_name: "dev_to_articles"
-# Click on article titles in browser
-Use extract_learned_elements with pattern_name: "dev_to_articles"
+Think of this as tending a real garden:
 
-# Use your new pattern
-Get the top 10 stories from https://dev.to
-```
+🌱 **Planting Seeds** - Teaching Claude new websites and patterns
+🌿 **Daily Tending** - Reviewing and rating the links Claude finds
+🌸 **Seasonal Harvests** - Creating themed reading lists from your collection
+🌳 **Long-term Growth** - Building a personal knowledge base that reflects your journey
 
----
+The goal isn't to save everything you see online. It's to thoughtfully curate content that genuinely interests you, creating a personal library that becomes more valuable over time.
 
-## 🎯 **Pro Tips**
+## Getting Help
 
-### **Efficient Collection**
-- **Batch multiple sites** in one command for faster collection
-- **Use specific subreddits** rather than general ones for better content
-- **Set reasonable limits** (10-20 stories) to avoid overwhelming your feed
+Claude is designed to be your guide through all of this. If you ever get stuck:
 
-### **Smart Curation**
-- **Rate immediately** while the content is fresh in your mind
-- **Use consistent tags** to build searchable categories
-- **Add notes** to remember why something was important
-- **Mark public** only your best finds for team sharing
+1. **Ask Claude directly**: "I'm not sure how to [do something]"
+2. **Request explanations**: "Can you explain how the rating system works?"
+3. **Get suggestions**: "What's a good way to organize cooking links?"
 
-### **Pattern Learning**
-- **Click 5-10 examples** when learning a new site pattern
-- **Focus on title elements** rather than metadata for better extraction
-- **Test patterns immediately** after creating them
-- **Give descriptive names** to patterns for easy identification
+Remember: This tool is designed for regular people, not programmers. If something feels too complicated, it probably is - ask Claude to explain it more simply!
 
-### **Search Optimization**
-- **Use natural language** for quick exploration
-- **Use SQL** for complex analysis and reporting
-- **Combine filters** for precise content discovery
-- **Save useful queries** as documentation for repeated use
-
----
-
-## 🔧 **Troubleshooting**
-
-### **Browser Issues**
-```
-Use test_browser_health
-```
-If this fails:
-- Run `npx playwright install chromium`
-- Restart Claude Desktop
-- Check file permissions
-
-### **Site Learning Problems**
-- **Red highlighting not appearing**: Refresh page and try `start_learning_mode` again
-- **No stories extracted**: Click more examples or try different elements
-- **Pattern not working**: Use `list_all_patterns` to verify it was saved
-
-### **Database Issues**
-```
-Use get_database_schema
-```
-This shows your database structure and confirms it's working.
-
----
-
-Your personal story curation system is now ready! Start collecting, organizing, and discovering the content that matters most to you.
+Start with one website you enjoy browsing, teach Claude your pattern, and watch your personal link garden begin to grow. 🌱
