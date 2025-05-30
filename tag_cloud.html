@@ -1,0 +1,734 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Tag Cloud - Thursday, May 29, 2025</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            line-height: 1.6;
+            color: #333;
+            background: #f8f9fa;
+            padding: 20px;
+        }
+        
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 12px;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.07);
+            overflow: hidden;
+        }
+        
+        .header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 30px;
+            text-align: center;
+        }
+        
+        .header h1 {
+            font-size: 2.5em;
+            margin-bottom: 10px;
+            font-weight: 300;
+        }
+        
+        .header .subtitle {
+            opacity: 0.9;
+            font-size: 1.1em;
+        }
+        
+        .stats {
+            background: #f8f9fa;
+            padding: 15px 30px;
+            border-bottom: 1px solid #e9ecef;
+            text-align: center;
+            font-size: 0.9em;
+            color: #6c757d;
+        }
+        
+        .tag-cloud {
+            padding: 40px;
+            text-align: center;
+            line-height: 2;
+        }
+        
+        .tag {
+            display: inline-block;
+            margin: 8px;
+            padding: 6px 12px;
+            background: #e3f2fd;
+            color: #1976d2;
+            text-decoration: none;
+            border-radius: 20px;
+            transition: all 0.3s ease;
+            cursor: pointer;
+            border: 2px solid transparent;
+        }
+        
+        .tag:hover {
+            background: #1976d2;
+            color: white;
+            transform: translateY(-2px);
+            box-shadow: 0 4px 8px rgba(25, 118, 210, 0.3);
+        }
+        
+        .tag.selected {
+            background: #1976d2;
+            color: white;
+            border-color: #0d47a1;
+        }
+        
+        .tag-count {
+            font-size: 0.8em;
+            opacity: 0.7;
+            margin-left: 4px;
+        }
+        
+        .links-section {
+            background: #f8f9fa;
+            padding: 30px;
+            border-top: 1px solid #e9ecef;
+            min-height: 200px;
+        }
+        
+        .links-title {
+            font-size: 1.5em;
+            margin-bottom: 20px;
+            color: #2c3e50;
+            text-align: center;
+        }
+        
+        .links-container {
+            display: none;
+        }
+        
+        .links-container.active {
+            display: block;
+        }
+        
+        .link-item {
+            background: white;
+            padding: 15px;
+            margin-bottom: 10px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
+            transition: transform 0.2s ease;
+        }
+        
+        .link-item:hover {
+            transform: translateY(-1px);
+            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+        }
+        
+        .link-title {
+            font-weight: 600;
+            color: #2c3e50;
+            text-decoration: none;
+            display: block;
+            margin-bottom: 5px;
+        }
+        
+        .link-title:hover {
+            color: #667eea;
+        }
+        
+        .link-meta {
+            font-size: 0.9em;
+            color: #6c757d;
+            display: flex;
+            gap: 15px;
+            align-items: center;
+            flex-wrap: wrap;
+        }
+        
+        .link-score {
+            color: #ffc107;
+        }
+        
+        .instructions {
+            text-align: center;
+            color: #6c757d;
+            font-style: italic;
+            margin-top: 20px;
+        }
+        
+        @media (max-width: 768px) {
+            body {
+                padding: 10px;
+            }
+            
+            .header {
+                padding: 20px;
+            }
+            
+            .header h1 {
+                font-size: 2em;
+            }
+            
+            .tag-cloud, .links-section {
+                padding: 20px;
+            }
+            
+            .tag {
+                margin: 4px;
+                padding: 4px 8px;
+                font-size: 0.9em;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🏷️ Tag Cloud</h1>
+            <div class="subtitle">Explore your personal knowledge collection • Thursday, May 29, 2025</div>
+        </div>
+        
+        <div class="stats">
+            📊 14 unique tags • 🔗 160 total tagged links
+        </div>
+        
+        <div class="tag-cloud">
+            <span class="tag" data-tag="reddit" style="font-size: 2.5em;">
+                reddit
+                <span class="tag-count">(114)</span>
+              </span><span class="tag" data-tag="hacker-news" style="font-size: 1.1194690265486726em;">
+                hacker-news
+                <span class="tag-count">(10)</span>
+              </span><span class="tag" data-tag="ai" style="font-size: 1.1061946902654867em;">
+                ai
+                <span class="tag-count">(9)</span>
+              </span><span class="tag" data-tag="programming" style="font-size: 1.0530973451327434em;">
+                programming
+                <span class="tag-count">(5)</span>
+              </span><span class="tag" data-tag="mobile" style="font-size: 1.0530973451327434em;">
+                mobile
+                <span class="tag-count">(5)</span>
+              </span><span class="tag" data-tag="tutorial" style="font-size: 1.0398230088495575em;">
+                tutorial
+                <span class="tag-count">(4)</span>
+              </span><span class="tag" data-tag="web-dev" style="font-size: 1.0265486725663717em;">
+                web-dev
+                <span class="tag-count">(3)</span>
+              </span><span class="tag" data-tag="tech-company" style="font-size: 1.0265486725663717em;">
+                tech-company
+                <span class="tag-count">(3)</span>
+              </span><span class="tag" data-tag="show" style="font-size: 1.0132743362831858em;">
+                show
+                <span class="tag-count">(2)</span>
+              </span><span class="tag" data-tag="opinion" style="font-size: 1em;">
+                opinion
+                <span class="tag-count">(1)</span>
+              </span><span class="tag" data-tag="show-hn" style="font-size: 1em;">
+                show-hn
+                <span class="tag-count">(1)</span>
+              </span><span class="tag" data-tag="education" style="font-size: 1em;">
+                education
+                <span class="tag-count">(1)</span>
+              </span><span class="tag" data-tag="research" style="font-size: 1em;">
+                research
+                <span class="tag-count">(1)</span>
+              </span><span class="tag" data-tag="remote-work" style="font-size: 1em;">
+                remote-work
+                <span class="tag-count">(1)</span>
+              </span>
+        </div>
+        
+        <div class="links-section">
+            <div class="links-title">Click a tag to see related links</div>
+            <div class="instructions">Tags are sized by frequency - larger tags appear more often in your collection</div>
+            
+            
+              <div class="links-container" data-tag="reddit">
+                <h3 style="margin-bottom: 15px; color: #1976d2;">📁 Links tagged with "reddit" (114 total)</h3>
+                
+                  <div class="link-item">
+                    <a href="https://github.com/Olow304/memvid" target="_blank" class="link-title">
+                      I accidentally built a vector database using video compression
+                    </a>
+                    <div class="link-meta">
+                      <span>🌐 old.reddit.com</span>
+                      <span>🕒 today</span>
+                      
+                    </div>
+                  </div>
+                
+                  <div class="link-item">
+                    <a href="https://developers.slashdot.org/story/25/05/29/1921248/stack-overflows-radical-new-plan-to-fight-ai-induced-death-spiral" target="_blank" class="link-title">
+                      Stack Overflow&#039;s Radical New Plan To Fight AI-Induced Death Spiral - Slashdot
+                    </a>
+                    <div class="link-meta">
+                      <span>🌐 old.reddit.com</span>
+                      <span>🕒 today</span>
+                      
+                    </div>
+                  </div>
+                
+                  <div class="link-item">
+                    <a href="https://alb.reddit.com/cr?za=1_Zb6EITcBiD3MmorlyJ7Hz9xcN6dEoFjKGQrT06jfNj0SOAoYMvZ88rUw01SojY3m23hLf5YtNEG_cZwAaMiij4AKiyNywKV4F5SW-DcsVFptQaLAXFtDEsFa3pKIR54dZzdXIvnqdbJS-WMfU4jyVWWe5ofOsGOn9xUifARBn9YXaA4vbWScCDOI9QEbSG2bcEFAM64OOkM4-JUAJGVOpg8xgoa4SWgJn890pNxcl-qEgBkCTatF1OPSBF1tY86xWuHZ31EEB99kSWN-W2Ti7J_cdRYYjGw7le7YDuBNREJyMviUz9Y2M1wzQD6rru8K-VpTUVKJOB0Vam3fVmeAWnDgT6dcoU3_03X5IoFiI9o4yWqe0I5C3PPNTpCV3CLqgJDQZBDrS35R-MHVPHDefZ-auIrFEM7-T2v9qbVtpsgiv6J-RdWq0kKbus-mOaE4NING-9nxr7LSBBxhkJ-Nj-TO7Lu7OxsvIqjvpqlc0KHqeTCOP4vXleDjzZ38gbtD_qN7sUlGnyujHzU3MfTJ93BES7RI10H1omuP-8qKj9WK7l&zp=Pl0COIRIJWNeoheX7lor_qwIdXWtDtXKkKskh7RpTxbE-IeeM3syXzrt__fkht2_IP_OCZLIQ3GOjk4P6eIhYNyY7C871r1vA0PsAqqES6B1TFZI7v9T6AhZCNmt5KaVmaiZl0igWshkji_FI7OW6LBEkYT45PE_NmDbMoRQe_CQWGSNNEOcohwT4bza01uwf-ZCLsm8vsdI7jLVw41ycEvw4uAiwOWsUm-6aAm1FaUxMekEGnXM6DXN4YFfx3IZHkGpYNyKBDth_RlA_P20np86eAs" target="_blank" class="link-title">
+                      Please welcome your host...Sofia Carson! Join her and your favorite Netflix stars at TUDUM 2025 — a global celebration of fandom. Live on Netflix, May 31 at 8pm ET | 5pm PT.
+                    </a>
+                    <div class="link-meta">
+                      <span>🌐 old.reddit.com</span>
+                      <span>🕒 today</span>
+                      
+                    </div>
+                  </div>
+                
+                
+                  <div style="text-align: center; margin-top: 15px; color: #6c757d; font-style: italic;">
+                    ... and 111 more links with this tag
+                  </div>
+                
+              </div>
+            
+              <div class="links-container" data-tag="hacker-news">
+                <h3 style="margin-bottom: 15px; color: #1976d2;">📁 Links tagged with "hacker-news" (10 total)</h3>
+                
+                  <div class="link-item">
+                    <a href="https://www.nature.com/articles/s41588-025-02172-8" target="_blank" class="link-title">
+                      Editing repeats in Huntington&#039;s:fewer somatic repeat expansions in patient cells
+                    </a>
+                    <div class="link-meta">
+                      <span>🌐 news.ycombinator.com</span>
+                      <span>🕒 today</span>
+                      
+                    </div>
+                  </div>
+                
+                  <div class="link-item">
+                    <a href="https://weatherstar.netbymatt.com/" target="_blank" class="link-title">
+                      WeatherStar 4000+: Weather Channel Simulator
+                    </a>
+                    <div class="link-meta">
+                      <span>🌐 news.ycombinator.com</span>
+                      <span>🕒 -1 days ago</span>
+                      
+                    </div>
+                  </div>
+                
+                  <div class="link-item">
+                    <a href="https://bfl.ai/models/flux-kontext" target="_blank" class="link-title">
+                      FLUX.1 Kontext
+                    </a>
+                    <div class="link-meta">
+                      <span>🌐 news.ycombinator.com</span>
+                      <span>🕒 -1 days ago</span>
+                      
+                    </div>
+                  </div>
+                
+                
+                  <div style="text-align: center; margin-top: 15px; color: #6c757d; font-style: italic;">
+                    ... and 7 more links with this tag
+                  </div>
+                
+              </div>
+            
+              <div class="links-container" data-tag="ai">
+                <h3 style="margin-bottom: 15px; color: #1976d2;">📁 Links tagged with "ai" (9 total)</h3>
+                
+                  <div class="link-item">
+                    <a href="https://developers.slashdot.org/story/25/05/29/1921248/stack-overflows-radical-new-plan-to-fight-ai-induced-death-spiral" target="_blank" class="link-title">
+                      Stack Overflow&#039;s Radical New Plan To Fight AI-Induced Death Spiral - Slashdot
+                    </a>
+                    <div class="link-meta">
+                      <span>🌐 old.reddit.com</span>
+                      <span>🕒 today</span>
+                      
+                    </div>
+                  </div>
+                
+                  <div class="link-item">
+                    <a href="https://www.financialexpress.com/business/start-ups/why-did-microsoft-backed-1-3bn-builderai-collapse-accused-of-using-indian-codersforaiwork/3854944/" target="_blank" class="link-title">
+                      Why did Microsoft-backed $1.3bn Builder.ai collapse? Accused of using Indian coders for ‘AI’ work
+                    </a>
+                    <div class="link-meta">
+                      <span>🌐 old.reddit.com</span>
+                      <span>🕒 today</span>
+                      
+                    </div>
+                  </div>
+                
+                  <div class="link-item">
+                    <a href="https://www.reddit.com/live/18hnzysb1elcs" target="_blank" class="link-title">
+                      /r/WorldNews Live Thread: Russian Invasion of Ukraine Day 1190, Part 1 (Thread #1337)
+                    </a>
+                    <div class="link-meta">
+                      <span>🌐 old.reddit.com</span>
+                      <span>🕒 today</span>
+                      
+                    </div>
+                  </div>
+                
+                
+                  <div style="text-align: center; margin-top: 15px; color: #6c757d; font-style: italic;">
+                    ... and 6 more links with this tag
+                  </div>
+                
+              </div>
+            
+              <div class="links-container" data-tag="programming">
+                <h3 style="margin-bottom: 15px; color: #1976d2;">📁 Links tagged with "programming" (5 total)</h3>
+                
+                  <div class="link-item">
+                    <a href="https://www.financialexpress.com/business/start-ups/why-did-microsoft-backed-1-3bn-builderai-collapse-accused-of-using-indian-codersforaiwork/3854944/" target="_blank" class="link-title">
+                      Why did Microsoft-backed $1.3bn Builder.ai collapse? Accused of using Indian coders for ‘AI’ work
+                    </a>
+                    <div class="link-meta">
+                      <span>🌐 old.reddit.com</span>
+                      <span>🕒 today</span>
+                      
+                    </div>
+                  </div>
+                
+                  <div class="link-item">
+                    <a href="https://corrode.dev/podcast/s04e04-rust/" target="_blank" class="link-title">
+                      From Systems Programming to Foundational Software: 10 Years of Rust with Niko Matsakis (Live Podcast)
+                    </a>
+                    <div class="link-meta">
+                      <span>🌐 old.reddit.com</span>
+                      <span>🕒 today</span>
+                      
+                    </div>
+                  </div>
+                
+                  <div class="link-item">
+                    <a href="https://www.jalopnik.com/1872373/tesla-full-self-driving-hits-child-school-bus-test/" target="_blank" class="link-title">
+                      Tesla Running So-Called &#039;Full Self-Driving&#039; Software Splatters &#039;Child&#039; In School Bus Test
+                    </a>
+                    <div class="link-meta">
+                      <span>🌐 old.reddit.com</span>
+                      <span>🕒 today</span>
+                      
+                    </div>
+                  </div>
+                
+                
+                  <div style="text-align: center; margin-top: 15px; color: #6c757d; font-style: italic;">
+                    ... and 2 more links with this tag
+                  </div>
+                
+              </div>
+            
+              <div class="links-container" data-tag="mobile">
+                <h3 style="margin-bottom: 15px; color: #1976d2;">📁 Links tagged with "mobile" (5 total)</h3>
+                
+                  <div class="link-item">
+                    <a href="https://i.redd.it/iylttkggis3f1.png" target="_blank" class="link-title">
+                      Gen Z won&#039;t even apply to a job if the salary isn&#039;t listed.
+                    </a>
+                    <div class="link-meta">
+                      <span>🌐 old.reddit.com</span>
+                      <span>🕒 today</span>
+                      
+                    </div>
+                  </div>
+                
+                  <div class="link-item">
+                    <a href="http://sfruby.com" target="_blank" class="link-title">
+                      San Francisco Ruby Conference is happening on 11/19-20
+                    </a>
+                    <div class="link-meta">
+                      <span>🌐 old.reddit.com</span>
+                      <span>🕒 today</span>
+                      
+                    </div>
+                  </div>
+                
+                  <div class="link-item">
+                    <a href="https://old.reddit.com/r/AskReddit/comments/1kyidi9/what_makes_you_happy/" target="_blank" class="link-title">
+                      What makes you happy?
+                    </a>
+                    <div class="link-meta">
+                      <span>🌐 old.reddit.com</span>
+                      <span>🕒 today</span>
+                      
+                    </div>
+                  </div>
+                
+                
+                  <div style="text-align: center; margin-top: 15px; color: #6c757d; font-style: italic;">
+                    ... and 2 more links with this tag
+                  </div>
+                
+              </div>
+            
+              <div class="links-container" data-tag="tutorial">
+                <h3 style="margin-bottom: 15px; color: #1976d2;">📁 Links tagged with "tutorial" (4 total)</h3>
+                
+                  <div class="link-item">
+                    <a href="https://old.reddit.com/r/elixir/comments/1kxg0r9/project_folder_structure_looking_for_detailed/" target="_blank" class="link-title">
+                      Project folder structure... Looking for detailed explanation or best practices guide
+                    </a>
+                    <div class="link-meta">
+                      <span>🌐 old.reddit.com</span>
+                      <span>🕒 today</span>
+                      
+                    </div>
+                  </div>
+                
+                  <div class="link-item">
+                    <a href="https://old.reddit.com/r/Futurology/comments/84m56h/tips_on_how_to_find_content_to_submit_to/" target="_blank" class="link-title">
+                      Tips on how to find content to submit
+                    </a>
+                    <div class="link-meta">
+                      <span>🌐 old.reddit.com</span>
+                      <span>🕒 today</span>
+                      
+                    </div>
+                  </div>
+                
+                  <div class="link-item">
+                    <a href="https://bit.ly/2NWNaEW" target="_blank" class="link-title">
+                      Machine Learning
+                    </a>
+                    <div class="link-meta">
+                      <span>🌐 old.reddit.com</span>
+                      <span>🕒 today</span>
+                      
+                    </div>
+                  </div>
+                
+                
+                  <div style="text-align: center; margin-top: 15px; color: #6c757d; font-style: italic;">
+                    ... and 1 more links with this tag
+                  </div>
+                
+              </div>
+            
+              <div class="links-container" data-tag="web-dev">
+                <h3 style="margin-bottom: 15px; color: #1976d2;">📁 Links tagged with "web-dev" (3 total)</h3>
+                
+                  <div class="link-item">
+                    <a href="https://overreacted.io/one-roundtrip-per-navigation/" target="_blank" class="link-title">
+                      One Roundtrip Per Navigation — overreacted
+                    </a>
+                    <div class="link-meta">
+                      <span>🌐 old.reddit.com</span>
+                      <span>🕒 today</span>
+                      
+                    </div>
+                  </div>
+                
+                  <div class="link-item">
+                    <a href="https://old.reddit.com/r/javascript/comments/1kvpu23/your_rjavascript_recap_for_the_week_of_may_19_may/" target="_blank" class="link-title">
+                      Your /r/javascript recap for the week of May 19 - May 25, 2025
+                    </a>
+                    <div class="link-meta">
+                      <span>🌐 old.reddit.com</span>
+                      <span>🕒 today</span>
+                      
+                    </div>
+                  </div>
+                
+                  <div class="link-item">
+                    <a href="http://www.cc.com/shows/nathan-for-you" target="_blank" class="link-title">
+                      Comedy Central Website
+                    </a>
+                    <div class="link-meta">
+                      <span>🌐 old.reddit.com</span>
+                      <span>🕒 today</span>
+                      
+                    </div>
+                  </div>
+                
+                
+              </div>
+            
+              <div class="links-container" data-tag="tech-company">
+                <h3 style="margin-bottom: 15px; color: #1976d2;">📁 Links tagged with "tech-company" (3 total)</h3>
+                
+                  <div class="link-item">
+                    <a href="https://www.jalopnik.com/1872373/tesla-full-self-driving-hits-child-school-bus-test/" target="_blank" class="link-title">
+                      Tesla Running So-Called &#039;Full Self-Driving&#039; Software Splatters &#039;Child&#039; In School Bus Test
+                    </a>
+                    <div class="link-meta">
+                      <span>🌐 old.reddit.com</span>
+                      <span>🕒 today</span>
+                      
+                    </div>
+                  </div>
+                
+                  <div class="link-item">
+                    <a href="https://alb.reddit.com/cr?za=H28a8Oi7NO3VMeyE9e-2GxEy8P3bxw5098WK2dCoypJSEBpeSasL9SfurjzxvKU-UNpAaCw58Lq3JNfX859Km2tQBSVo6TuofW4yRI3ETJngQUm-WyTFc87KE1B_SeScr9ZkqLCRV9LUOjbwdAN_d7JdHHpWw_aHo9LxQbkJ_kuy6tY06ZNERO9g7X9kWJxB03wQSdirfx38plFMBZevhyujtd1wBy390KdyZNZLX7myN2PNiJ-XqGXlBtVgL5H11vTucV15U8FXV0yq3fO8LbRvc_ObJdJA3NCzqM62A_Y1sncVWYeyk88blxlD_7fQ1vz6jhOUaeti7pcsgs7A9Pw5ZwrZCFyJWuCl6brg5o0qglfEHUC6v9SEjxWlLn-iYmWAu17lqaIgC_WPQ_AKnuSMHkIuOQiV7AYb_uRT32Q-pOD6-m2abhyAtYdLyCHkRlywakEF7b4Bse6-rCWeVgPgh-Hwdt1D1xis0fOGaK7lS40_FBtXk7DgCdevkfc21FnTjfJC6Vo9GEWQ_CU-LqHqbck&zp=nAogExUjX-L7Q4vGVVu0JVmVyCLttTgVkRoAsjXhscAAvbjbCo2FFHyEbfRqYQ-zTigOQrUlyQJv7RI6SFgvJ6-S_IJJsufz3_QebaaVSy51itobiOI6Z0nYLOrUODgWPFYHGOq5gLRGpxaE2SOEoJ1fRjIDLdmFGxXO4HXthicoyGZIj-PGB1zHvaGt_2QbzGsaqcrNjwQiHdg-MnnkAGEg7s9Gzq_Fapnr2Izc-l9UHKFNNXWKQ_TWe4xcl0jfu8EvJwo1sKHVSKmlZrCHH5oinx9CwpqIYP0fVTvzkkFIFM0W9ysQS1qYC5hADybGdZCKTfMG9A0PDEX4OUHQ_a-GC5Lx6Lquzr9izmgcxKtffHHLJjzNo1SzjIFIoCyCaBtZXwF8NsnmPkMf3aFU8292OLv7YCiWBvefqOejv1gIWkhUE3Tj4jHKtVUMCrikyFu0QBA1HqNECRgZbB6heZCOvhSmyFrYBpinNkA8_j-IyVl1XiWu6WGlfUfJ4Tj_Q4VSQbHuG2vMxgvIMFLULAP93mtMxLAqtmPgRicj4qAhu7XsScRohEU" target="_blank" class="link-title">
+                      Navigate the world (and the rivers) from a totally new perspective. Experience Civilization VII - VR only on Meta Quest 3/3s.
+                    </a>
+                    <div class="link-meta">
+                      <span>🌐 old.reddit.com</span>
+                      <span>🕒 today</span>
+                      
+                    </div>
+                  </div>
+                
+                  <div class="link-item">
+                    <a href="https://www.carscoops.com/2025/05/detroit-tesla-cybertruck-storage-parking-code-violation/" target="_blank" class="link-title">
+                      Tesla Dumping Unsold Cybertrucks At Mall Parking Lot And The City’s Fed Up
+                    </a>
+                    <div class="link-meta">
+                      <span>🌐 old.reddit.com</span>
+                      <span>🕒 today</span>
+                      
+                    </div>
+                  </div>
+                
+                
+              </div>
+            
+              <div class="links-container" data-tag="show">
+                <h3 style="margin-bottom: 15px; color: #1976d2;">📁 Links tagged with "show" (2 total)</h3>
+                
+                  <div class="link-item">
+                    <a href="https://commandline.stribny.name/" target="_blank" class="link-title">
+                      Show HN: I wrote a modern Command Line Handbook
+                    </a>
+                    <div class="link-meta">
+                      <span>🌐 news.ycombinator.com</span>
+                      <span>🕒 -1 days ago</span>
+                      
+                    </div>
+                  </div>
+                
+                  <div class="link-item">
+                    <a href="https://goodinternetmagazine.com/my-website-is-ugly-because-i-made-it/" target="_blank" class="link-title">
+                      My website is ugly because I made it
+                    </a>
+                    <div class="link-meta">
+                      <span>🌐 news.ycombinator.com</span>
+                      <span>🕒 -1 days ago</span>
+                      
+                    </div>
+                  </div>
+                
+                
+              </div>
+            
+              <div class="links-container" data-tag="opinion">
+                <h3 style="margin-bottom: 15px; color: #1976d2;">📁 Links tagged with "opinion" (1 total)</h3>
+                
+                  <div class="link-item">
+                    <a href="https://alb.reddit.com/cr?za=H28a8Oi7NO3VMeyE9e-2GxEy8P3bxw5098WK2dCoypJSEBpeSasL9SfurjzxvKU-UNpAaCw58Lq3JNfX859Km2tQBSVo6TuofW4yRI3ETJngQUm-WyTFc87KE1B_SeScr9ZkqLCRV9LUOjbwdAN_d7JdHHpWw_aHo9LxQbkJ_kuy6tY06ZNERO9g7X9kWJxB03wQSdirfx38plFMBZevhyujtd1wBy390KdyZNZLX7myN2PNiJ-XqGXlBtVgL5H11vTucV15U8FXV0yq3fO8LbRvc_ObJdJA3NCzqM62A_Y1sncVWYeyk88blxlD_7fQ1vz6jhOUaeti7pcsgs7A9Pw5ZwrZCFyJWuCl6brg5o0qglfEHUC6v9SEjxWlLn-iYmWAu17lqaIgC_WPQ_AKnuSMHkIuOQiV7AYb_uRT32Q-pOD6-m2abhyAtYdLyCHkRlywakEF7b4Bse6-rCWeVgPgh-Hwdt1D1xis0fOGaK7lS40_FBtXk7DgCdevkfc21FnTjfJC6Vo9GEWQ_CU-LqHqbck&zp=nAogExUjX-L7Q4vGVVu0JVmVyCLttTgVkRoAsjXhscAAvbjbCo2FFHyEbfRqYQ-zTigOQrUlyQJv7RI6SFgvJ6-S_IJJsufz3_QebaaVSy51itobiOI6Z0nYLOrUODgWPFYHGOq5gLRGpxaE2SOEoJ1fRjIDLdmFGxXO4HXthicoyGZIj-PGB1zHvaGt_2QbzGsaqcrNjwQiHdg-MnnkAGEg7s9Gzq_Fapnr2Izc-l9UHKFNNXWKQ_TWe4xcl0jfu8EvJwo1sKHVSKmlZrCHH5oinx9CwpqIYP0fVTvzkkFIFM0W9ysQS1qYC5hADybGdZCKTfMG9A0PDEX4OUHQ_a-GC5Lx6Lquzr9izmgcxKtffHHLJjzNo1SzjIFIoCyCaBtZXwF8NsnmPkMf3aFU8292OLv7YCiWBvefqOejv1gIWkhUE3Tj4jHKtVUMCrikyFu0QBA1HqNECRgZbB6heZCOvhSmyFrYBpinNkA8_j-IyVl1XiWu6WGlfUfJ4Tj_Q4VSQbHuG2vMxgvIMFLULAP93mtMxLAqtmPgRicj4qAhu7XsScRohEU" target="_blank" class="link-title">
+                      Navigate the world (and the rivers) from a totally new perspective. Experience Civilization VII - VR only on Meta Quest 3/3s.
+                    </a>
+                    <div class="link-meta">
+                      <span>🌐 old.reddit.com</span>
+                      <span>🕒 today</span>
+                      
+                    </div>
+                  </div>
+                
+                
+              </div>
+            
+              <div class="links-container" data-tag="show-hn">
+                <h3 style="margin-bottom: 15px; color: #1976d2;">📁 Links tagged with "show-hn" (1 total)</h3>
+                
+                  <div class="link-item">
+                    <a href="https://commandline.stribny.name/" target="_blank" class="link-title">
+                      Show HN: I wrote a modern Command Line Handbook
+                    </a>
+                    <div class="link-meta">
+                      <span>🌐 news.ycombinator.com</span>
+                      <span>🕒 -1 days ago</span>
+                      
+                    </div>
+                  </div>
+                
+                
+              </div>
+            
+              <div class="links-container" data-tag="education">
+                <h3 style="margin-bottom: 15px; color: #1976d2;">📁 Links tagged with "education" (1 total)</h3>
+                
+                  <div class="link-item">
+                    <a href="https://alloc.dev/2025/05/29/learning_c3" target="_blank" class="link-title">
+                      Learning C3
+                    </a>
+                    <div class="link-meta">
+                      <span>🌐 news.ycombinator.com</span>
+                      <span>🕒 -1 days ago</span>
+                      
+                    </div>
+                  </div>
+                
+                
+              </div>
+            
+              <div class="links-container" data-tag="research">
+                <h3 style="margin-bottom: 15px; color: #1976d2;">📁 Links tagged with "research" (1 total)</h3>
+                
+                  <div class="link-item">
+                    <a href="https://reddit.com/r/technology/comments/1kosvoj/scientists_have_been_studying_remote_work_for/" target="_blank" class="link-title">
+                      Scientists have been studying remote work for four years and have reached a very clear conclusion: &quot;Working from home makes us happier.&quot;
+                    </a>
+                    <div class="link-meta">
+                      <span>🌐 old.reddit.com</span>
+                      <span>🕒 -1 days ago</span>
+                      <span class="link-score">⭐ 3/5</span>
+                    </div>
+                  </div>
+                
+                
+              </div>
+            
+              <div class="links-container" data-tag="remote-work">
+                <h3 style="margin-bottom: 15px; color: #1976d2;">📁 Links tagged with "remote-work" (1 total)</h3>
+                
+                  <div class="link-item">
+                    <a href="https://reddit.com/r/technology/comments/1kosvoj/scientists_have_been_studying_remote_work_for/" target="_blank" class="link-title">
+                      Scientists have been studying remote work for four years and have reached a very clear conclusion: &quot;Working from home makes us happier.&quot;
+                    </a>
+                    <div class="link-meta">
+                      <span>🌐 old.reddit.com</span>
+                      <span>🕒 -1 days ago</span>
+                      <span class="link-score">⭐ 3/5</span>
+                    </div>
+                  </div>
+                
+                
+              </div>
+            
+        </div>
+    </div>
+    
+    <script>
+        document.addEventListener('DOMContentLoaded', function() {
+            const tags = document.querySelectorAll('.tag');
+            const linksContainers = document.querySelectorAll('.links-container');
+            
+            tags.forEach(tag => {
+                tag.addEventListener('click', function() {
+                    const tagName = this.getAttribute('data-tag');
+                    
+                    // Remove selected class from all tags
+                    tags.forEach(t => t.classList.remove('selected'));
+                    
+                    // Add selected class to clicked tag
+                    this.classList.add('selected');
+                    
+                    // Hide all link containers
+                    linksContainers.forEach(container => {
+                        container.classList.remove('active');
+                    });
+                    
+                    // Show the corresponding links container
+                    const targetContainer = document.querySelector('[data-tag="' + tagName + '"]');
+                    if (targetContainer) {
+                        targetContainer.classList.add('active');
+                        targetContainer.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+                    }
+                });
+            });
+        });
+    </script>
+</body>
+</html>

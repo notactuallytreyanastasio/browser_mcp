@@ -363,6 +363,124 @@ class BrowserMCPServer {
             properties: {}
           },
         },
+        {
+          name: 'bag_of_links',
+          description: 'Get a curated bag of diverse, interesting links from your collection in a clean HTML format',
+          inputSchema: {
+            type: 'object',
+            properties: {
+              count: {
+                type: 'number',
+                description: 'Number of links to include in the bag (default: 10)',
+                default: 10
+              },
+              min_days_old: {
+                type: 'number',
+                description: 'Minimum days old for links (default: 2)',
+                default: 2
+              },
+              max_days_old: {
+                type: 'number',
+                description: 'Maximum days old for links (default: 90)',
+                default: 90
+              }
+            }
+          },
+        },
+        {
+          name: 'remove_ai_tags',
+          description: 'Remove all "ai" tags from your saved links database',
+          inputSchema: {
+            type: 'object',
+            properties: {}
+          },
+        },
+        {
+          name: 'tag_cloud',
+          description: 'Generate an interactive tag cloud HTML page showing tag frequency and associated links',
+          inputSchema: {
+            type: 'object',
+            properties: {
+              max_tags: {
+                type: 'number',
+                description: 'Maximum number of tags to include (default: 50)',
+                default: 50
+              },
+              links_per_tag: {
+                type: 'number',
+                description: 'Maximum number of links to show per tag (default: 5)',
+                default: 5
+              }
+            }
+          },
+        },
+        {
+          name: 'delete_pattern',
+          description: 'Delete a specific learned pattern by name and domain',
+          inputSchema: {
+            type: 'object',
+            properties: {
+              pattern_name: {
+                type: 'string',
+                description: 'Name of the pattern to delete'
+              },
+              domain: {
+                type: 'string',
+                description: 'Domain where the pattern exists (e.g., "old.reddit.com")',
+                default: 'old.reddit.com'
+              }
+            },
+            required: ['pattern_name']
+          },
+        },
+        {
+          name: 'query_metadata',
+          description: 'Query the rich metadata stored with extracted links for analytics',
+          inputSchema: {
+            type: 'object',
+            properties: {
+              limit: {
+                type: 'number',
+                description: 'Number of records to return (default: 10)',
+                default: 10
+              },
+              site: {
+                type: 'string',
+                description: 'Filter by source site (e.g., "old.reddit.com")'
+              }
+            }
+          },
+        },
+        {
+          name: 'start_crawl',
+          description: 'Start an intelligent crawl to discover new subreddits and interesting content based on your interests',
+          inputSchema: {
+            type: 'object',
+            properties: {
+              seed_subreddits: {
+                type: 'array',
+                items: { type: 'string' },
+                description: 'Starting subreddits to crawl from (e.g., ["programming", "technology"])',
+                default: ["programming", "technology", "datascience"]
+              },
+              max_subreddits: {
+                type: 'number',
+                description: 'Maximum number of new subreddits to discover (default: 10)',
+                default: 10
+              },
+              links_per_subreddit: {
+                type: 'number',
+                description: 'Number of top links to collect from each subreddit (default: 5)',
+                default: 5
+              },
+              discovery_depth: {
+                type: 'number',
+                description: 'How deep to crawl (1 = direct, 2 = friends of friends, etc.) (default: 2)',
+                default: 2
+              }
+            }
+          },
+        },
       ],
     }));
 
@@ -430,6 +548,29 @@ class BrowserMCPServer {
           
           case 'get_database_schema':
             return await this.getDatabaseSchema();
+          
+          case 'bag_of_links':
+            return await this.getBagOfLinks(args.count || 10, args.min_days_old || 2, args.max_days_old || 90);
+          
+          case 'remove_ai_tags':
+            return await this.removeAITags();
+          
+          case 'tag_cloud':
+            return await this.generateTagCloud(args.max_tags || 50, args.links_per_tag || 5);
+          
+          case 'delete_pattern':
+            return await this.deletePattern(args.pattern_name, args.domain || 'old.reddit.com');
+          
+          case 'query_metadata':
+            return await this.queryMetadata(args.limit || 10, args.site);
+          
+          case 'start_crawl':
+            return await this.startCrawl(
+              args.seed_subreddits || ["programming", "technology", "datascience"],
+              args.max_subreddits || 10,
+              args.links_per_subreddit || 5,
+              args.discovery_depth || 2
+            );
           
           case 'get_session_stats':
             return await this.getSessionStats();
@@ -1256,14 +1397,37 @@ class BrowserMCPServer {
           for (const el of elements) {
             const text = await el.textContent();
             const href = await el.getAttribute('href');
-            const tagName = await el.evaluate(node => node.tagName.toLowerCase());
+            const elementData = await el.evaluate(node => ({
+              tagName: node.tagName.toLowerCase(),
+              className: node.className,
+              id: node.id,
+              dataset: Object.fromEntries(Object.entries(node.dataset || {})),
+              attributes: Array.from(node.attributes).reduce((acc, attr) => {
+                acc[attr.name] = attr.value;
+                return acc;
+              }, {}),
+              parentTag: node.parentElement?.tagName.toLowerCase(),
+              position: {
+                x: node.getBoundingClientRect().left,
+                y: node.getBoundingClientRect().top,
+                width: node.getBoundingClientRect().width,
+                height: node.getBoundingClientRect().height
+              }
+            }));
             
             if (text && text.trim()) {
               extractedData.push({
                 selector,
                 text: text.trim(),
                 href: href,
-                tagName: tagName
+                tagName: elementData.tagName,
+                className: elementData.className,
+                elementId: elementData.id,
+                dataset: elementData.dataset,
+                attributes: elementData.attributes,
+                parentTag: elementData.parentTag,
+                position: elementData.position,
+                extractedAt: new Date().toISOString()
               });
             }
           }
@@ -1304,13 +1468,51 @@ class BrowserMCPServer {
               fullUrl = new URL(item.href, currentUrl).toString();
             }
 
+            // Generate suggested tags based on title and source
+            const suggestedTags = await this.generateSuggestedTags(item.text, domain);
+            
+            // Create rich metadata for analytics
+            const metadata = {
+              extraction: {
+                pattern: patternName,
+                selector: item.selector,
+                extractedAt: item.extractedAt,
+                workingSelectors: workingSelectors
+              },
+              element: {
+                tagName: item.tagName,
+                className: item.className,
+                elementId: item.elementId,
+                dataset: item.dataset,
+                attributes: item.attributes,
+                parentTag: item.parentTag,
+                position: item.position
+              },
+              site: {
+                domain: domain,
+                url: currentUrl,
+                userAgent: await this.page.evaluate(() => navigator.userAgent),
+                viewport: await this.page.evaluate(() => ({
+                  width: window.innerWidth,
+                  height: window.innerHeight
+                }))
+              },
+              content: {
+                hasHref: !!item.href,
+                textLength: item.text.length,
+                linkType: item.href ? (item.href.startsWith('http') ? 'external' : 'internal') : 'text'
+              }
+            };
+            
             await this.database.saveLink({
               title: item.text,
               url: fullUrl,
               sourceSite: domain,
               sourcePage: new URL(currentUrl).pathname,
+              tags: suggestedTags,
               isCurated: false,
-              isPublic: false
+              isPublic: false,
+              metadata: metadata
             });
             savedLinksCount++;
           } catch (error) {
@@ -1332,7 +1534,7 @@ class BrowserMCPServer {
                   `${i + 1}. ${item.text}${item.href ? ` (${item.href})` : ''}`
                 ).join('\n') +
                 (extractedData.length === 0 ? '\nNo elements found. The page structure may have changed.' : '') +
-                (savedLinksCount > 0 ? `\n\n💾 Saved ${savedLinksCount} new links to database` : ''),
+                (savedLinksCount > 0 ? `\n\n💾 Saved ${savedLinksCount} new links to database with auto-generated tags` : ''),
         },
       ],
     };
@@ -1417,13 +1619,18 @@ class BrowserMCPServer {
         if (saveLinks) {
           for (const story of stories) {
             try {
+              // Generate suggested tags based on title and source
+              const suggestedTags = await this.generateSuggestedTags(story.title, siteInfo.domain);
+              
               await this.database.saveLink({
                 title: story.title,
                 url: story.url,
                 sourceSite: siteInfo.domain,
                 sourcePage: siteInfo.displayName,
+                tags: suggestedTags,
                 isCurated: false,
-                isPublic: false
+                isPublic: false,
+                metadata: story.metadata
               });
               savedLinksCount++;
             } catch (error) {
@@ -1449,7 +1656,7 @@ class BrowserMCPServer {
     let output = this.formatMultiSiteOutput(allStories, errors, format);
     
     if (saveLinks && savedLinksCount > 0) {
-      output += `\n\n💾 Saved ${savedLinksCount} new links to database`;
+      output += `\n\n💾 Saved ${savedLinksCount} new links to database with auto-generated tags`;
     }
 
     return {
@@ -1586,6 +1793,23 @@ class BrowserMCPServer {
           for (const el of elements) {
             const text = await el.textContent();
             const href = await el.getAttribute('href');
+            const elementData = await el.evaluate(node => ({
+              tagName: node.tagName.toLowerCase(),
+              className: node.className,
+              id: node.id,
+              dataset: Object.fromEntries(Object.entries(node.dataset || {})),
+              attributes: Array.from(node.attributes).reduce((acc, attr) => {
+                acc[attr.name] = attr.value;
+                return acc;
+              }, {}),
+              parentTag: node.parentElement?.tagName.toLowerCase(),
+              position: {
+                x: node.getBoundingClientRect().left,
+                y: node.getBoundingClientRect().top,
+                width: node.getBoundingClientRect().width,
+                height: node.getBoundingClientRect().height
+              }
+            }));
             
             if (text && text.trim()) {
               // Apply site-specific filtering
@@ -1607,10 +1831,40 @@ class BrowserMCPServer {
                   fullUrl = new URL(href, siteInfo.url).toString();
                 }
                 
+                // Create rich metadata for this story
+                const metadata = {
+                  extraction: {
+                    pattern: patternName,
+                    selector: selector,
+                    extractedAt: new Date().toISOString(),
+                    siteType: siteInfo.type
+                  },
+                  element: {
+                    tagName: elementData.tagName,
+                    className: elementData.className,
+                    elementId: elementData.id,
+                    dataset: elementData.dataset,
+                    attributes: elementData.attributes,
+                    parentTag: elementData.parentTag,
+                    position: elementData.position
+                  },
+                  site: {
+                    domain: siteInfo.domain,
+                    url: siteInfo.url,
+                    displayName: siteInfo.displayName
+                  },
+                  content: {
+                    hasHref: !!href,
+                    textLength: text.trim().length,
+                    linkType: href ? (href.startsWith('http') ? 'external' : 'internal') : 'text'
+                  }
+                };
+                
                 stories.push({
                   title: text.trim(),
                   url: fullUrl,
-                  selector: selector
+                  selector: selector,
+                  metadata: metadata
                 });
               }
             }
@@ -2161,6 +2415,1494 @@ class BrowserMCPServer {
     }
     
     return false;
+  }
+
+  async generateSuggestedTags(title, sourceSite = '') {
+    try {
+      // Use LLM to generate intelligent tags
+      const response = await this.server.createMessage({
+        messages: [
+          {
+            role: "user",
+            content: {
+              type: "text",
+              text: `Analyze this article title and generate 3-5 specific, relevant tags:
+
+Title: "${title}"
+Source: ${sourceSite}
+
+CRITICAL: Do NOT use "ai" tag unless the article is specifically about artificial intelligence, machine learning, neural networks, or AI development. Being processed by AI does not make content AI-related.
+
+Rules:
+- Tag based on the article's actual subject matter only
+- Use specific topics over broad categories  
+- Include content format only if obvious (tutorial, news, opinion, review)
+- Use lowercase, hyphenated format
+
+Examples:
+"How to Build a React Component" → ["react", "javascript", "tutorial", "web-dev"]
+"Company Raises $50M Series A" → ["startup", "funding", "news", "venture-capital"]  
+"My Thoughts on Remote Work" → ["remote-work", "opinion", "workplace", "productivity"]
+"Nathan For You Episode Discussion" → ["comedy", "television", "entertainment"]
+"ChatGPT Can Now Browse the Web" → ["ai", "chatgpt", "news", "llm"]
+
+JSON Array:`
+            }
+          }
+        ],
+        systemPrompt: "You are a precise content categorizer. Be conservative with tags - only apply them if they directly relate to the content. Avoid over-tagging or applying tangentially related categories. Focus on what someone would actually search for to find this content.",
+        maxTokens: 100,
+        temperature: 0.1
+      });
+
+      const responseText = response.content.text.trim();
+      
+      // Parse the JSON response
+      try {
+        const tags = JSON.parse(responseText);
+        if (Array.isArray(tags) && tags.every(tag => typeof tag === 'string')) {
+          // Clean tags and ensure they're properly formatted
+          const cleanTags = tags
+            .map(tag => tag.toLowerCase().replace(/[^a-z0-9-]/g, '').substring(0, 20))
+            .filter(tag => tag.length > 1)
+            .slice(0, 5);
+          
+          console.error(`LLM generated tags for "${title}": ${cleanTags.join(', ')}`);
+          return cleanTags;
+        }
+      } catch (parseError) {
+        console.error('Failed to parse LLM tag response:', parseError.message);
+      }
+    } catch (error) {
+      console.error('LLM tag generation failed, falling back to keyword matching:', error.message);
+    }
+
+    // Fallback to original keyword-based approach if LLM fails
+    return this.generateFallbackTags(title, sourceSite);
+  }
+
+  generateFallbackTags(title, sourceSite = '') {
+    const tags = new Set();
+    const titleLower = title.toLowerCase();
+    
+    // Quick keyword matching for fallback
+    const quickKeywords = {
+      'ai': ['ai', 'artificial intelligence', 'machine learning', 'gpt', 'claude', 'llm'],
+      'programming': ['programming', 'coding', 'developer', 'software', 'code', 'api'],
+      'web-dev': ['html', 'css', 'javascript', 'react', 'vue', 'web'],
+      'mobile': ['ios', 'android', 'mobile', 'app'],
+      'startup': ['startup', 'founder', 'vc', 'funding'],
+      'tutorial': ['tutorial', 'how to', 'guide', 'learn'],
+      'news': ['announces', 'releases', 'launches', 'breaking'],
+      'science': ['science', 'research', 'study', 'discovery']
+    };
+    
+    // Source-specific tags
+    if (sourceSite.includes('reddit')) tags.add('reddit');
+    else if (sourceSite.includes('ycombinator')) tags.add('hacker-news');
+    else if (sourceSite.includes('fark')) tags.add('fark');
+    
+    // Check keywords
+    for (const [tag, keywords] of Object.entries(quickKeywords)) {
+      if (keywords.some(keyword => titleLower.includes(keyword))) {
+        tags.add(tag);
+      }
+    }
+    
+    return Array.from(tags).slice(0, 5);
+  }
+
+  async getBagOfLinks(count = 10, minDaysOld = 2, maxDaysOld = 90) {
+    try {
+      // Create a sophisticated query that prioritizes interesting content
+      const query = `
+        SELECT 
+          title,
+          url,
+          source_site,
+          source_page,
+          tags,
+          score,
+          notes,
+          saved_at,
+          is_curated,
+          -- Create a ranking score that prefers:
+          -- 1. Links with scores (weighted heavily)
+          -- 2. Links with notes (bonus points)
+          -- 3. Curated links (bonus points)
+          -- 4. Diverse sources (handled in application logic)
+          (
+            CASE WHEN score > 0 THEN score * 10 ELSE 1 END +
+            CASE WHEN notes IS NOT NULL AND notes != '' THEN 5 ELSE 0 END +
+            CASE WHEN is_curated = 1 THEN 3 ELSE 0 END +
+            -- Add small randomization factor
+            (ABS(RANDOM()) % 5)
+          ) as ranking_score
+        FROM links 
+        WHERE 
+          saved_at >= datetime('now', '-${maxDaysOld} days') AND 
+          saved_at <= datetime('now', '-${minDaysOld} days')
+        ORDER BY ranking_score DESC, saved_at DESC
+        LIMIT ${count * 3}
+      `;
+
+      let candidateLinks = await this.database.executeSql(query);
+      let usedFallback = false;
+      
+      // Fallback: If no links found in the date range, try getting from all available links
+      if (candidateLinks.length === 0) {
+        console.error(`No links found in ${minDaysOld}-${maxDaysOld} day range, falling back to all links`);
+        usedFallback = true;
+        
+        const fallbackQuery = `
+          SELECT 
+            title,
+            url,
+            source_site,
+            source_page,
+            tags,
+            score,
+            notes,
+            saved_at,
+            is_curated,
+            (
+              CASE WHEN score > 0 THEN score * 10 ELSE 1 END +
+              CASE WHEN notes IS NOT NULL AND notes != '' THEN 5 ELSE 0 END +
+              CASE WHEN is_curated = 1 THEN 3 ELSE 0 END +
+              (ABS(RANDOM()) % 5)
+            ) as ranking_score
+          FROM links 
+          ORDER BY ranking_score DESC, saved_at DESC
+          LIMIT ${count * 3}
+        `;
+        
+        candidateLinks = await this.database.executeSql(fallbackQuery);
+        
+        if (candidateLinks.length === 0) {
+          return {
+            content: [
+              {
+                type: 'text',
+                text: `No links found in your database. Start saving some links first!`,
+              },
+            ],
+          };
+        }
+      }
+
+      // Diversify sources - pick from different sites when possible
+      const selectedLinks = this.diversifyLinkSelection(candidateLinks, count);
+      
+      // Generate the HTML page
+      const htmlContent = this.generateBagOfLinksHTML(selectedLinks, minDaysOld, maxDaysOld);
+      
+      // Save HTML to a file
+      const fs = await import('fs');
+      const path = await import('path');
+      const { fileURLToPath } = await import('url');
+      const __filename = fileURLToPath(import.meta.url);
+      const __dirname = path.dirname(__filename);
+      
+      const outputPath = path.join(__dirname, '..', 'bag_of_links.html');
+      await fs.promises.writeFile(outputPath, htmlContent, 'utf8');
+      
+      let output = `# 🎒 Bag of Links\n\n`;
+      output += `Generated **${selectedLinks.length} curated links** from your collection!\n\n`;
+      
+      if (usedFallback) {
+        output += `**Time Range:** All available links (no links found in ${minDaysOld}-${maxDaysOld} day range)\n`;
+      } else {
+        output += `**Time Range:** ${minDaysOld}-${maxDaysOld} days old\n`;
+      }
+      
+      output += `**Sources:** ${[...new Set(selectedLinks.map(l => l.source_site))].join(', ')}\n`;
+      output += `**File:** \`${outputPath}\`\n\n`;
+      
+      // Show preview of links
+      output += `## Preview\n\n`;
+      selectedLinks.forEach((link, i) => {
+        const tags = JSON.parse(link.tags || '[]');
+        const tagStr = tags.length > 0 ? ` [${tags.slice(0, 3).join(', ')}]` : '';
+        const scoreStr = link.score > 0 ? ` ⭐${link.score}` : '';
+        const notesStr = link.notes ? ' 📝' : '';
+        const curatedStr = link.is_curated ? ' ✅' : '';
+        
+        output += `${i + 1}. **[${link.title}](${link.url})**${tagStr}${scoreStr}${notesStr}${curatedStr}\n`;
+        output += `   ${link.source_page} • ${this.formatTimeAgo(link.saved_at)}\n\n`;
+      });
+      
+      output += `💡 **The complete HTML is included below** for instant copying and sharing!\n\n`;
+      output += `🔗 **Local file saved at:** \`${outputPath}\`\n\n`;
+      output += `---\n\n## 📋 Complete HTML (Copy & Share)\n\n`;
+      output += `\`\`\`html\n${htmlContent}\n\`\`\``;
+
+      return {
+        content: [
+          {
+            type: 'text',
+            text: output,
+          }
+        ],
+      };
+    } catch (error) {
+      throw new Error(`Failed to generate bag of links: ${error.message}`);
+    }
+  }
+
+  diversifyLinkSelection(candidateLinks, targetCount) {
+    // Group links by source site
+    const linksBySource = {};
+    candidateLinks.forEach(link => {
+      if (!linksBySource[link.source_site]) {
+        linksBySource[link.source_site] = [];
+      }
+      linksBySource[link.source_site].push(link);
+    });
+
+    const selectedLinks = [];
+    const sources = Object.keys(linksBySource);
+    let sourceIndex = 0;
+
+    // Round-robin selection to ensure diversity
+    while (selectedLinks.length < targetCount && selectedLinks.length < candidateLinks.length) {
+      const currentSource = sources[sourceIndex % sources.length];
+      const sourceLinks = linksBySource[currentSource];
+      
+      // Find the next unselected link from this source
+      const availableLink = sourceLinks.find(link => 
+        !selectedLinks.some(selected => selected.url === link.url)
+      );
+      
+      if (availableLink) {
+        selectedLinks.push(availableLink);
+      }
+      
+      sourceIndex++;
+      
+      // If we've cycled through all sources, break to avoid infinite loop
+      if (sourceIndex > sources.length * 10) {
+        break;
+      }
+    }
+
+    return selectedLinks;
+  }
+
+  generateBagOfLinksHTML(links, minDaysOld, maxDaysOld) {
+    const now = new Date();
+    const generatedDate = now.toLocaleDateString('en-US', { 
+      weekday: 'long', 
+      year: 'numeric', 
+      month: 'long', 
+      day: 'numeric' 
+    });
+
+    return `<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Bag of Links - ${generatedDate}</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            line-height: 1.6;
+            color: #333;
+            background: #f8f9fa;
+            padding: 20px;
+        }
+        
+        .container {
+            max-width: 800px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 12px;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.07);
+            overflow: hidden;
+        }
+        
+        .header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 30px;
+            text-align: center;
+        }
+        
+        .header h1 {
+            font-size: 2.5em;
+            margin-bottom: 10px;
+            font-weight: 300;
+        }
+        
+        .header .subtitle {
+            opacity: 0.9;
+            font-size: 1.1em;
+        }
+        
+        .stats {
+            background: #f8f9fa;
+            padding: 15px 30px;
+            border-bottom: 1px solid #e9ecef;
+            display: flex;
+            justify-content: space-between;
+            flex-wrap: wrap;
+            gap: 10px;
+            font-size: 0.9em;
+            color: #6c757d;
+        }
+        
+        .links {
+            padding: 0;
+        }
+        
+        .link-item {
+            padding: 25px 30px;
+            border-bottom: 1px solid #e9ecef;
+            transition: background-color 0.2s ease;
+        }
+        
+        .link-item:hover {
+            background-color: #f8f9fa;
+        }
+        
+        .link-item:last-child {
+            border-bottom: none;
+        }
+        
+        .link-title {
+            display: block;
+            font-size: 1.2em;
+            font-weight: 600;
+            color: #2c3e50;
+            text-decoration: none;
+            margin-bottom: 8px;
+            line-height: 1.4;
+        }
+        
+        .link-title:hover {
+            color: #667eea;
+        }
+        
+        .link-meta {
+            display: flex;
+            align-items: center;
+            gap: 15px;
+            flex-wrap: wrap;
+            margin-bottom: 10px;
+            font-size: 0.9em;
+            color: #6c757d;
+        }
+        
+        .meta-item {
+            display: flex;
+            align-items: center;
+            gap: 5px;
+        }
+        
+        .tags {
+            display: flex;
+            gap: 6px;
+            flex-wrap: wrap;
+            margin-top: 8px;
+        }
+        
+        .tag {
+            background: #e3f2fd;
+            color: #1976d2;
+            padding: 2px 8px;
+            border-radius: 12px;
+            font-size: 0.8em;
+            font-weight: 500;
+        }
+        
+        .notes {
+            background: #fff3cd;
+            border: 1px solid #ffeaa7;
+            border-radius: 6px;
+            padding: 12px;
+            margin-top: 10px;
+            font-style: italic;
+            color: #856404;
+        }
+        
+        .score-stars {
+            color: #ffc107;
+        }
+        
+        .curated-badge {
+            background: #d4edda;
+            color: #155724;
+            padding: 2px 6px;
+            border-radius: 4px;
+            font-size: 0.8em;
+            font-weight: 500;
+        }
+        
+        .footer {
+            text-align: center;
+            padding: 20px;
+            color: #6c757d;
+            font-size: 0.9em;
+            background: #f8f9fa;
+        }
+        
+        @media (max-width: 600px) {
+            body {
+                padding: 10px;
+            }
+            
+            .header {
+                padding: 20px;
+            }
+            
+            .header h1 {
+                font-size: 2em;
+            }
+            
+            .link-item {
+                padding: 20px;
+            }
+            
+            .stats {
+                padding: 15px 20px;
+                flex-direction: column;
+                gap: 5px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🎒 Bag of Links</h1>
+            <div class="subtitle">Curated from your personal collection • ${generatedDate}</div>
+        </div>
+        
+        <div class="stats">
+            <div>📊 ${links.length} carefully selected links</div>
+            <div>📅 ${minDaysOld}-${maxDaysOld} days old</div>
+            <div>🌐 ${[...new Set(links.map(l => l.source_site))].length} different sources</div>
+            <div>⭐ ${links.filter(l => l.score > 0).length} rated items</div>
+        </div>
+        
+        <div class="links">
+            ${links.map((link, index) => {
+              const tags = JSON.parse(link.tags || '[]');
+              const hasNotes = link.notes && link.notes.trim();
+              const timeAgo = this.formatTimeAgo(link.saved_at);
+              
+              return `
+                <div class="link-item">
+                    <a href="${link.url}" target="_blank" class="link-title">
+                        ${this.escapeHtml(link.title)}
+                    </a>
+                    
+                    <div class="link-meta">
+                        <div class="meta-item">
+                            🌐 <span>${link.source_page || link.source_site}</span>
+                        </div>
+                        <div class="meta-item">
+                            🕒 <span>${timeAgo}</span>
+                        </div>
+                        ${link.score > 0 ? `
+                            <div class="meta-item">
+                                <span class="score-stars">${'⭐'.repeat(link.score)}</span>
+                                <span>${link.score}/5</span>
+                            </div>
+                        ` : ''}
+                        ${link.is_curated ? '<span class="curated-badge">✅ Curated</span>' : ''}
+                        ${hasNotes ? '<span class="meta-item">📝 Notes</span>' : ''}
+                    </div>
+                    
+                    ${tags.length > 0 ? `
+                        <div class="tags">
+                            ${tags.slice(0, 5).map(tag => `<span class="tag">${this.escapeHtml(tag)}</span>`).join('')}
+                        </div>
+                    ` : ''}
+                    
+                    ${hasNotes ? `
+                        <div class="notes">
+                            💭 ${this.escapeHtml(link.notes)}
+                        </div>
+                    ` : ''}
+                </div>
+              `;
+            }).join('')}
+        </div>
+        
+        <div class="footer">
+            Generated by your Browser MCP Server • Open links in new tabs by clicking
+        </div>
+    </div>
+</body>
+</html>`;
+  }
+
+  formatTimeAgo(dateString) {
+    const now = new Date();
+    const past = new Date(dateString);
+    const diffMs = now - past;
+    const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
+    
+    if (diffDays === 0) return 'today';
+    if (diffDays === 1) return 'yesterday';
+    if (diffDays < 7) return `${diffDays} days ago`;
+    if (diffDays < 30) return `${Math.floor(diffDays / 7)} weeks ago`;
+    return `${Math.floor(diffDays / 30)} months ago`;
+  }
+
+  escapeHtml(text) {
+    if (!text) return '';
+    return text
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#039;');
+  }
+
+  async removeAITags() {
+    try {
+      const updatedCount = await this.database.removeAITags();
+      
+      return {
+        content: [
+          {
+            type: 'text',
+            text: `✅ Successfully removed AI tags from ${updatedCount} links!\n\nYour database has been cleaned of inappropriate AI tags. Future link saves will use the improved LLM prompt that won't over-apply AI tags.`,
+          },
+        ],
+      };
+    } catch (error) {
+      throw new Error(`Failed to remove AI tags: ${error.message}`);
+    }
+  }
+
+  async generateTagCloud(maxTags = 50, linksPerTag = 5) {
+    try {
+      // Get all links with their tags
+      const links = await this.database.executeSql(`
+        SELECT id, title, url, tags, score, source_site, saved_at 
+        FROM links 
+        WHERE tags != '[]' AND tags IS NOT NULL
+        ORDER BY saved_at DESC
+      `);
+
+      // Count tag frequency and collect links for each tag
+      const tagStats = {};
+      
+      links.forEach(link => {
+        try {
+          const tags = JSON.parse(link.tags || '[]');
+          tags.forEach(tag => {
+            if (!tagStats[tag]) {
+              tagStats[tag] = {
+                count: 0,
+                links: []
+              };
+            }
+            tagStats[tag].count++;
+            if (tagStats[tag].links.length < linksPerTag) {
+              tagStats[tag].links.push(link);
+            }
+          });
+        } catch (parseError) {
+          console.error(`Failed to parse tags for link ${link.id}:`, parseError.message);
+        }
+      });
+
+      // Sort tags by frequency and limit
+      const sortedTags = Object.entries(tagStats)
+        .sort(([,a], [,b]) => b.count - a.count)
+        .slice(0, maxTags);
+
+      if (sortedTags.length === 0) {
+        return {
+          content: [
+            {
+              type: 'text',
+              text: 'No tags found in your database. Start saving some links with tags first!',
+            },
+          ],
+        };
+      }
+
+      // Generate HTML
+      const htmlContent = this.generateTagCloudHTML(sortedTags);
+      
+      // Save to file
+      const fs = await import('fs');
+      const path = await import('path');
+      const { fileURLToPath } = await import('url');
+      const __filename = fileURLToPath(import.meta.url);
+      const __dirname = path.dirname(__filename);
+      
+      const outputPath = path.join(__dirname, '..', 'tag_cloud.html');
+      await fs.promises.writeFile(outputPath, htmlContent, 'utf8');
+
+      // Automatically open the HTML file in the default browser
+      try {
+        const { exec } = await import('child_process');
+        const { promisify } = await import('util');
+        const execAsync = promisify(exec);
+        
+        // Determine the correct command based on the operating system
+        let openCommand;
+        if (process.platform === 'darwin') {
+          openCommand = `open "${outputPath}"`;
+        } else if (process.platform === 'win32') {
+          openCommand = `start "" "${outputPath}"`;
+        } else {
+          openCommand = `xdg-open "${outputPath}"`;
+        }
+        
+        await execAsync(openCommand);
+        console.error(`Opened tag cloud in browser: ${outputPath}`);
+      } catch (openError) {
+        console.error('Failed to auto-open file:', openError.message);
+      }
+
+      let output = `# 🏷️ Tag Cloud\n\n`;
+      output += `Generated interactive tag cloud with **${sortedTags.length} tags** from your collection!\n\n`;
+      output += `🚀 **Automatically opened in your browser!**\n\n`;
+      output += `**Most popular tags:**\n`;
+      
+      // Show top 10 tags in the preview
+      sortedTags.slice(0, 10).forEach(([tag, stats], i) => {
+        output += `${i + 1}. **${tag}** (${stats.count} links)\n`;
+      });
+      
+      output += `\n**File saved at:** \`${outputPath}\`\n\n`;
+      output += `💡 **Open the HTML file** to see the interactive tag cloud with clickable tags and links!\n\n`;
+      output += `---\n\n## 📋 Complete HTML (Copy & Share)\n\n`;
+      output += `\`\`\`html\n${htmlContent}\n\`\`\``;
+
+      return {
+        content: [
+          {
+            type: 'text',
+            text: output,
+          }
+        ],
+      };
+    } catch (error) {
+      throw new Error(`Failed to generate tag cloud: ${error.message}`);
+    }
+  }
+
+  async deletePattern(patternName, domain = 'old.reddit.com') {
+    try {
+      const deletedCount = await this.database.deletePattern(domain, patternName);
+      
+      return {
+        content: [
+          {
+            type: 'text',
+            text: `✅ Successfully deleted pattern "${patternName}" from domain "${domain}"!\n\nThe old pattern has been removed. You can now create a new pattern with the same name or use your new pattern without conflicts.`,
+          },
+        ],
+      };
+    } catch (error) {
+      throw new Error(`Failed to delete pattern: ${error.message}`);
+    }
+  }
+
+  async startCrawl(seedSubreddits, maxSubreddits, linksPerSubreddit, discoveryDepth) {
+    try {
+      let output = `# 🕷️ Intelligent Content Crawl\n\n`;
+      output += `**Starting crawl with seeds:** ${seedSubreddits.join(', ')}\n`;
+      output += `**Discovery depth:** ${discoveryDepth} levels\n`;
+      output += `**Max new subreddits:** ${maxSubreddits}\n`;
+      output += `**Links per subreddit:** ${linksPerSubreddit}\n\n`;
+
+      if (!this.browser) {
+        await this.openBrowser();
+      }
+
+      const discoveredSubreddits = new Set(seedSubreddits);
+      const crawlResults = {
+        subreddits: [],
+        totalLinks: 0,
+        discoveries: [],
+        errors: []
+      };
+
+      // Start crawling from seed subreddits
+      output += `## Phase 1: Exploring Seed Subreddits\n\n`;
+
+      for (const subreddit of seedSubreddits) {
+        try {
+          output += `### 📍 /r/${subreddit}\n`;
+          
+          const subredditResult = await this.crawlSubreddit(subreddit, linksPerSubreddit, discoveryDepth > 1);
+          crawlResults.subreddits.push(subredditResult);
+          crawlResults.totalLinks += subredditResult.links.length;
+          
+          output += `- **Links collected:** ${subredditResult.links.length}\n`;
+          output += `- **Pages visited:** ${subredditResult.metadata.pagesVisited}\n`;
+          output += `- **Related subreddits found:** ${subredditResult.relatedSubreddits.length}\n`;
+          
+          // Add newly discovered subreddits for future exploration
+          subredditResult.relatedSubreddits.forEach(related => {
+            if (discoveredSubreddits.size < maxSubreddits + seedSubreddits.length) {
+              discoveredSubreddits.add(related);
+              if (!seedSubreddits.includes(related)) {
+                crawlResults.discoveries.push({
+                  subreddit: related,
+                  discoveredFrom: subreddit,
+                  depth: 1
+                });
+              }
+            }
+          });
+          
+          output += `\n`;
+          
+          // Rate limiting
+          await this.delay(2000);
+          
+        } catch (error) {
+          crawlResults.errors.push({ subreddit, error: error.message });
+          output += `- ❌ **Error:** ${error.message}\n\n`;
+        }
+      }
+
+      // Phase 2: Explore discovered subreddits (if depth > 1)
+      if (discoveryDepth > 1 && crawlResults.discoveries.length > 0) {
+        output += `## Phase 2: Exploring Discovered Subreddits\n\n`;
+        
+        const toExplore = crawlResults.discoveries.slice(0, maxSubreddits);
+        for (const discovery of toExplore) {
+          try {
+            output += `### 🔍 /r/${discovery.subreddit} (found via /r/${discovery.discoveredFrom})\n`;
+            
+            const subredditResult = await this.crawlSubreddit(discovery.subreddit, Math.ceil(linksPerSubreddit / 2), false);
+            crawlResults.subreddits.push(subredditResult);
+            crawlResults.totalLinks += subredditResult.links.length;
+            
+            output += `- **Links collected:** ${subredditResult.links.length}\n`;
+            output += `- **Pages visited:** ${subredditResult.metadata.pagesVisited}\n`;
+            output += `\n`;
+            
+            // Rate limiting
+            await this.delay(2000);
+            
+          } catch (error) {
+            crawlResults.errors.push({ subreddit: discovery.subreddit, error: error.message });
+            output += `- ❌ **Error:** ${error.message}\n\n`;
+          }
+        }
+      }
+
+      // Summary
+      output += `## 📊 Crawl Summary\n\n`;
+      output += `- **Subreddits explored:** ${crawlResults.subreddits.length}\n`;
+      output += `- **Total links collected:** ${crawlResults.totalLinks}\n`;
+      output += `- **New subreddits discovered:** ${crawlResults.discoveries.length}\n`;
+      output += `- **Errors encountered:** ${crawlResults.errors.length}\n\n`;
+
+      if (crawlResults.discoveries.length > 0) {
+        output += `### 🎯 Newly Discovered Subreddits:\n`;
+        crawlResults.discoveries.slice(0, 10).forEach(d => {
+          output += `- **/r/${d.subreddit}** (via /r/${d.discoveredFrom})\n`;
+        });
+        output += `\n`;
+      }
+
+      if (crawlResults.totalLinks > 0) {
+        output += `### 🔗 Sample Links Collected:\n`;
+        const allLinks = crawlResults.subreddits.flatMap(s => s.links);
+        allLinks.slice(0, 5).forEach((link, i) => {
+          output += `${i + 1}. **[${link.title}](${link.url})**\n`;
+          output += `   Source: /r/${link.subreddit}\n\n`;
+        });
+      }
+
+      output += `💡 **All collected links have been saved to your database with rich metadata for future analysis!**\n`;
+      output += `\n🎯 **Try these next:**\n`;
+      output += `- \`tag_cloud\` to visualize your expanded collection\n`;
+      output += `- \`query_metadata\` to analyze crawl patterns\n`;
+      output += `- \`bag_of_links\` to see your best discoveries\n`;
+
+      return {
+        content: [
+          {
+            type: 'text',
+            text: output,
+          },
+        ],
+      };
+    } catch (error) {
+      throw new Error(`Crawl failed: ${error.message}`);
+    }
+  }
+
+  async crawlSubreddit(subreddit, maxLinks, discoverRelated = true) {
+    const url = `https://old.reddit.com/r/${subreddit}`;
+    
+    // Navigate to subreddit
+    const domain = new URL(url).hostname;
+    await this.sessionManager.setupPageForDomain(this.page, domain);
+    await this.sessionManager.respectRateLimit(domain, 3000, 6000);
+    
+    try {
+      await this.page.goto(url, { 
+        waitUntil: 'domcontentloaded',
+        timeout: 45000 
+      });
+    } catch (error) {
+      console.error(`Navigation failed, trying with load: ${error.message}`);
+      await this.page.goto(url, { 
+        waitUntil: 'load',
+        timeout: 60000 
+      });
+    }
+
+    const result = {
+      subreddit,
+      url,
+      links: [],
+      relatedSubreddits: [],
+      metadata: {
+        crawledAt: new Date().toISOString(),
+        subscriberCount: null,
+        description: null,
+        pagesVisited: 0
+      }
+    };
+
+    // Extract subreddit metadata
+    try {
+      const metadata = await this.page.evaluate(() => {
+        const subscriberElement = document.querySelector('.subscribers .number');
+        const descElement = document.querySelector('.usertext-body .md p');
+        
+        return {
+          subscribers: subscriberElement ? subscriberElement.textContent.trim() : null,
+          description: descElement ? descElement.textContent.trim() : null
+        };
+      });
+      
+      result.metadata.subscriberCount = metadata.subscribers;
+      result.metadata.description = metadata.description;
+    } catch (metaError) {
+      console.error('Failed to extract subreddit metadata:', metaError.message);
+    }
+
+    // Extract links using existing reddit pattern with pagination
+    const patterns = await this.database.getPatterns('old.reddit.com');
+    const redditPattern = patterns.find(p => p.pattern_name.includes('reddit'));
+    
+    if (redditPattern) {
+      await this.extractLinksWithPagination(result, redditPattern, maxLinks, subreddit, url);
+    }
+
+    // Discover related subreddits (if enabled)
+    if (discoverRelated) {
+      try {
+        const relatedSubs = await this.page.evaluate(() => {
+          const related = new Set();
+          
+          // Look for subreddit mentions in post titles and comments
+          const links = document.querySelectorAll('a[href*="/r/"]');
+          links.forEach(link => {
+            const match = link.href.match(/\/r\/([a-zA-Z0-9_]+)/);
+            if (match && match[1] && match[1].length > 2) {
+              related.add(match[1].toLowerCase());
+            }
+          });
+
+          // Look in sidebar for related subreddits
+          const sidebarLinks = document.querySelectorAll('.side a[href*="/r/"]');
+          sidebarLinks.forEach(link => {
+            const match = link.href.match(/\/r\/([a-zA-Z0-9_]+)/);
+            if (match && match[1] && match[1].length > 2) {
+              related.add(match[1].toLowerCase());
+            }
+          });
+
+          return Array.from(related).slice(0, 8);
+        });
+
+        result.relatedSubreddits = relatedSubs.filter(sub => sub !== subreddit);
+      } catch (relatedError) {
+        console.error('Failed to discover related subreddits:', relatedError.message);
+      }
+    }
+
+    return result;
+  }
+
+  async extractLinksWithPagination(result, redditPattern, maxLinks, subreddit, baseUrl) {
+    const linksPerPage = Math.min(25, maxLinks); // Reddit shows ~25 links per page
+    const maxPages = Math.ceil(maxLinks / linksPerPage);
+    let currentPage = 1;
+    
+    console.error(`Extracting up to ${maxLinks} links across ${maxPages} pages for /r/${subreddit}`);
+    
+    while (result.links.length < maxLinks && currentPage <= maxPages) {
+      console.error(`Page ${currentPage}: Currently have ${result.links.length}/${maxLinks} links`);
+      
+      // Extract links from current page
+      const pageLinks = await this.extractLinksFromCurrentPage(redditPattern, result, subreddit, currentPage);
+      
+      if (pageLinks === 0) {
+        console.error(`No links found on page ${currentPage}, stopping pagination`);
+        break;
+      }
+      
+      result.metadata.pagesVisited = currentPage;
+      
+      // Check if we have enough links or if we're on the last possible page
+      if (result.links.length >= maxLinks) {
+        console.error(`Reached target of ${maxLinks} links`);
+        break;
+      }
+      
+      // Try to navigate to next page
+      const hasNextPage = await this.navigateToNextPage();
+      if (!hasNextPage) {
+        console.error(`No more pages available after page ${currentPage}`);
+        break;
+      }
+      
+      currentPage++;
+      
+      // Rate limiting between pages
+      await this.delay(2000);
+    }
+    
+    console.error(`Finished: collected ${result.links.length} links from ${result.metadata.pagesVisited} pages`);
+  }
+
+  async extractLinksFromCurrentPage(redditPattern, result, subreddit, pageNumber) {
+    let linksFoundOnPage = 0;
+    
+    for (const selector of redditPattern.selectors) {
+      try {
+        const elements = await this.page.$$(selector);
+        console.error(`Page ${pageNumber}: Selector "${selector}" found ${elements.length} elements`);
+        
+        if (elements.length > 0) {
+          for (const el of elements) {
+            const text = await el.textContent();
+            const href = await el.getAttribute('href');
+            
+            if (text && text.trim() && this.isRedditStory(text.trim(), href)) {
+              let fullUrl = href;
+              if (href && !href.startsWith('http')) {
+                try {
+                  fullUrl = new URL(href, this.page.url()).toString();
+                } catch (urlError) {
+                  console.error(`Invalid URL: ${href}`);
+                  continue;
+                }
+              }
+
+              // Check for duplicates (important for pagination)
+              if (result.links.some(link => link.url === fullUrl)) {
+                continue;
+              }
+
+              // Generate smart tags using LLM
+              const suggestedTags = await this.generateSuggestedTags(text.trim(), 'old.reddit.com');
+              
+              // Create rich metadata
+              const metadata = {
+                extraction: {
+                  pattern: redditPattern.pattern_name,
+                  selector: selector,
+                  extractedAt: new Date().toISOString(),
+                  crawlContext: 'discovery_crawl',
+                  pageNumber: pageNumber
+                },
+                subreddit: {
+                  name: subreddit,
+                  subscribers: result.metadata.subscriberCount,
+                  description: result.metadata.description
+                },
+                discovery: {
+                  crawlSession: Date.now(),
+                  linkPosition: result.links.length + 1,
+                  pagePosition: linksFoundOnPage + 1
+                }
+              };
+
+              // Save to database
+              try {
+                await this.database.saveLink({
+                  title: text.trim(),
+                  url: fullUrl,
+                  sourceSite: 'old.reddit.com',
+                  sourcePage: `/r/${subreddit}`,
+                  tags: suggestedTags,
+                  isCurated: false,
+                  isPublic: false,
+                  metadata: metadata
+                });
+
+                result.links.push({
+                  title: text.trim(),
+                  url: fullUrl,
+                  subreddit: subreddit,
+                  tags: suggestedTags,
+                  page: pageNumber
+                });
+                
+                linksFoundOnPage++;
+              } catch (saveError) {
+                console.error(`Failed to save link: ${saveError.message}`);
+              }
+            }
+          }
+          break; // Use first working selector
+        }
+      } catch (selectorError) {
+        console.error(`Selector failed: ${selectorError.message}`);
+        continue;
+      }
+    }
+    
+    return linksFoundOnPage;
+  }
+
+  async navigateToNextPage() {
+    try {
+      // Look for the "next" button in Reddit's pagination
+      const nextButton = await this.page.$('span.nextprev a[rel="nofollow next"]');
+      
+      if (!nextButton) {
+        console.error('No "next" button found');
+        return false;
+      }
+      
+      // Check if the next button is actually clickable (not grayed out)
+      const isClickable = await nextButton.evaluate(el => {
+        return !el.classList.contains('disabled') && 
+               el.textContent.trim().toLowerCase().includes('next');
+      });
+      
+      if (!isClickable) {
+        console.error('Next button is disabled');
+        return false;
+      }
+      
+      // Get the href for navigation
+      const nextUrl = await nextButton.getAttribute('href');
+      if (!nextUrl) {
+        console.error('Next button has no href');
+        return false;
+      }
+      
+      console.error(`Navigating to next page: ${nextUrl}`);
+      
+      // Navigate to next page
+      await Promise.all([
+        this.page.waitForNavigation({ 
+          waitUntil: 'domcontentloaded',
+          timeout: 30000 
+        }),
+        nextButton.click()
+      ]);
+      
+      // Small delay to ensure page is fully loaded
+      await this.delay(1500);
+      
+      return true;
+      
+    } catch (error) {
+      console.error(`Navigation to next page failed: ${error.message}`);
+      return false;
+    }
+  }
+
+  delay(ms) {
+    return new Promise(resolve => setTimeout(resolve, ms));
+  }
+
+  async queryMetadata(limit = 10, site = null) {
+    try {
+      let query = `
+        SELECT title, url, source_site, saved_at, metadata 
+        FROM links 
+        WHERE metadata IS NOT NULL
+      `;
+      const params = [];
+      
+      if (site) {
+        query += ` AND source_site = ?`;
+        params.push(site);
+      }
+      
+      query += ` ORDER BY saved_at DESC LIMIT ?`;
+      params.push(limit);
+      
+      const results = await this.database.executeSql(query, params);
+      
+      let output = `# 📊 Metadata Analytics\n\n`;
+      output += `Found **${results.length} links** with rich metadata!\n\n`;
+      
+      if (results.length === 0) {
+        output += 'No metadata found. Start extracting links with patterns to build up analytics data!\n';
+      } else {
+        results.forEach((link, i) => {
+          try {
+            const metadata = JSON.parse(link.metadata);
+            output += `## ${i + 1}. ${link.title}\n\n`;
+            output += `**URL:** ${link.url}\n`;
+            output += `**Source:** ${link.source_site}\n`;
+            output += `**Saved:** ${this.formatTimeAgo(link.saved_at)}\n\n`;
+            
+            if (metadata.extraction) {
+              output += `**Extraction Info:**\n`;
+              output += `- Pattern: ${metadata.extraction.pattern}\n`;
+              output += `- Selector: \`${metadata.extraction.selector}\`\n`;
+              if (metadata.extraction.siteType) {
+                output += `- Site Type: ${metadata.extraction.siteType}\n`;
+              }
+              output += `\n`;
+            }
+            
+            if (metadata.element) {
+              output += `**Element Info:**\n`;
+              output += `- Tag: \`<${metadata.element.tagName}>\`\n`;
+              if (metadata.element.className) {
+                output += `- CSS Classes: \`${metadata.element.className}\`\n`;
+              }
+              if (metadata.element.parentTag) {
+                output += `- Parent: \`<${metadata.element.parentTag}>\`\n`;
+              }
+              output += `\n`;
+            }
+            
+            if (metadata.content) {
+              output += `**Content Analysis:**\n`;
+              output += `- Text Length: ${metadata.content.textLength} chars\n`;
+              output += `- Link Type: ${metadata.content.linkType}\n`;
+              output += `- Has URL: ${metadata.content.hasHref ? 'Yes' : 'No'}\n`;
+              output += `\n`;
+            }
+            
+            output += `---\n\n`;
+          } catch (parseError) {
+            output += `## ${i + 1}. ${link.title}\n\n`;
+            output += `**URL:** ${link.url}\n`;
+            output += `**Source:** ${link.source_site}\n`;
+            output += `**Note:** Metadata parsing failed\n\n---\n\n`;
+          }
+        });
+        
+        output += `💡 **Next Steps:**\n`;
+        output += `- Export to DuckDB for advanced analytics\n`;
+        output += `- Build visualizations of extraction patterns\n`;
+        output += `- Analyze content trends across sites\n`;
+      }
+      
+      return {
+        content: [
+          {
+            type: 'text',
+            text: output,
+          },
+        ],
+      };
+    } catch (error) {
+      throw new Error(`Failed to query metadata: ${error.message}`);
+    }
+  }
+
+  generateTagCloudHTML(sortedTags) {
+    const now = new Date();
+    const generatedDate = now.toLocaleDateString('en-US', { 
+      weekday: 'long', 
+      year: 'numeric', 
+      month: 'long', 
+      day: 'numeric' 
+    });
+
+    // Calculate font sizes based on frequency
+    const maxCount = Math.max(...sortedTags.map(([,stats]) => stats.count));
+    const minCount = Math.min(...sortedTags.map(([,stats]) => stats.count));
+    
+    return `<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Tag Cloud - ${generatedDate}</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            line-height: 1.6;
+            color: #333;
+            background: #f8f9fa;
+            padding: 20px;
+        }
+        
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 12px;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.07);
+            overflow: hidden;
+        }
+        
+        .header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 30px;
+            text-align: center;
+        }
+        
+        .header h1 {
+            font-size: 2.5em;
+            margin-bottom: 10px;
+            font-weight: 300;
+        }
+        
+        .header .subtitle {
+            opacity: 0.9;
+            font-size: 1.1em;
+        }
+        
+        .stats {
+            background: #f8f9fa;
+            padding: 15px 30px;
+            border-bottom: 1px solid #e9ecef;
+            text-align: center;
+            font-size: 0.9em;
+            color: #6c757d;
+        }
+        
+        .tag-cloud {
+            padding: 40px;
+            text-align: center;
+            line-height: 2;
+        }
+        
+        .tag {
+            display: inline-block;
+            margin: 8px;
+            padding: 6px 12px;
+            background: #e3f2fd;
+            color: #1976d2;
+            text-decoration: none;
+            border-radius: 20px;
+            transition: all 0.3s ease;
+            cursor: pointer;
+            border: 2px solid transparent;
+        }
+        
+        .tag:hover {
+            background: #1976d2;
+            color: white;
+            transform: translateY(-2px);
+            box-shadow: 0 4px 8px rgba(25, 118, 210, 0.3);
+        }
+        
+        .tag.selected {
+            background: #1976d2;
+            color: white;
+            border-color: #0d47a1;
+        }
+        
+        .tag-count {
+            font-size: 0.8em;
+            opacity: 0.7;
+            margin-left: 4px;
+        }
+        
+        .links-section {
+            background: #f8f9fa;
+            padding: 30px;
+            border-top: 1px solid #e9ecef;
+            min-height: 200px;
+        }
+        
+        .links-title {
+            font-size: 1.5em;
+            margin-bottom: 20px;
+            color: #2c3e50;
+            text-align: center;
+        }
+        
+        .links-container {
+            display: none;
+        }
+        
+        .links-container.active {
+            display: block;
+        }
+        
+        .link-item {
+            background: white;
+            padding: 15px;
+            margin-bottom: 10px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
+            transition: transform 0.2s ease;
+        }
+        
+        .link-item:hover {
+            transform: translateY(-1px);
+            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+        }
+        
+        .link-title {
+            font-weight: 600;
+            color: #2c3e50;
+            text-decoration: none;
+            display: block;
+            margin-bottom: 5px;
+        }
+        
+        .link-title:hover {
+            color: #667eea;
+        }
+        
+        .link-meta {
+            font-size: 0.9em;
+            color: #6c757d;
+            display: flex;
+            gap: 15px;
+            align-items: center;
+            flex-wrap: wrap;
+        }
+        
+        .link-score {
+            color: #ffc107;
+        }
+        
+        .instructions {
+            text-align: center;
+            color: #6c757d;
+            font-style: italic;
+            margin-top: 20px;
+        }
+        
+        @media (max-width: 768px) {
+            body {
+                padding: 10px;
+            }
+            
+            .header {
+                padding: 20px;
+            }
+            
+            .header h1 {
+                font-size: 2em;
+            }
+            
+            .tag-cloud, .links-section {
+                padding: 20px;
+            }
+            
+            .tag {
+                margin: 4px;
+                padding: 4px 8px;
+                font-size: 0.9em;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🏷️ Tag Cloud</h1>
+            <div class="subtitle">Explore your personal knowledge collection • ${generatedDate}</div>
+        </div>
+        
+        <div class="stats">
+            📊 ${sortedTags.length} unique tags • 🔗 ${sortedTags.reduce((sum, [,stats]) => sum + stats.count, 0)} total tagged links
+        </div>
+        
+        <div class="tag-cloud">
+            ${sortedTags.map(([tag, stats]) => {
+              // Calculate font size based on frequency (1em to 2.5em)
+              const normalized = (stats.count - minCount) / (maxCount - minCount);
+              const fontSize = 1 + (normalized * 1.5);
+              
+              return `<span class="tag" data-tag="${this.escapeHtml(tag)}" style="font-size: ${fontSize}em;">
+                ${this.escapeHtml(tag)}
+                <span class="tag-count">(${stats.count})</span>
+              </span>`;
+            }).join('')}
+        </div>
+        
+        <div class="links-section">
+            <div class="links-title">Click a tag to see related links</div>
+            <div class="instructions">Tags are sized by frequency - larger tags appear more often in your collection</div>
+            
+            ${sortedTags.map(([tag, stats]) => `
+              <div class="links-container" data-tag="${this.escapeHtml(tag)}">
+                <h3 style="margin-bottom: 15px; color: #1976d2;">📁 Links tagged with "${this.escapeHtml(tag)}" (${stats.count} total)</h3>
+                ${stats.links.map(link => `
+                  <div class="link-item">
+                    <a href="${link.url}" target="_blank" class="link-title">
+                      ${this.escapeHtml(link.title)}
+                    </a>
+                    <div class="link-meta">
+                      <span>🌐 ${this.escapeHtml(link.source_site)}</span>
+                      <span>🕒 ${this.formatTimeAgo(link.saved_at)}</span>
+                      ${link.score > 0 ? `<span class="link-score">⭐ ${link.score}/5</span>` : ''}
+                    </div>
+                  </div>
+                `).join('')}
+                ${stats.count > stats.links.length ? `
+                  <div style="text-align: center; margin-top: 15px; color: #6c757d; font-style: italic;">
+                    ... and ${stats.count - stats.links.length} more links with this tag
+                  </div>
+                ` : ''}
+              </div>
+            `).join('')}
+        </div>
+    </div>
+    
+    <script>
+        document.addEventListener('DOMContentLoaded', function() {
+            const tags = document.querySelectorAll('.tag');
+            const linksContainers = document.querySelectorAll('.links-container');
+            
+            tags.forEach(tag => {
+                tag.addEventListener('click', function() {
+                    const tagName = this.getAttribute('data-tag');
+                    
+                    // Remove selected class from all tags
+                    tags.forEach(t => t.classList.remove('selected'));
+                    
+                    // Add selected class to clicked tag
+                    this.classList.add('selected');
+                    
+                    // Hide all link containers
+                    linksContainers.forEach(container => {
+                        container.classList.remove('active');
+                    });
+                    
+                    // Show the corresponding links container
+                    const targetContainer = document.querySelector('[data-tag="' + tagName + '"]');
+                    if (targetContainer) {
+                        targetContainer.classList.add('active');
+                        targetContainer.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+                    }
+                });
+            });
+        });
+    </script>
+</body>
+</html>`;
   }
 
   async run() {

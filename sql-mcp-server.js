@@ -215,17 +215,25 @@ class SQLQueryMCPServer {
       return "SELECT title, url, score, source_site FROM links WHERE is_public = 1 ORDER BY score DESC;";
     }
     
-    // Topic-based queries
+    // Topic-based queries (enhanced with tag support)
     if (q.includes('ai') || q.includes('artificial intelligence') || q.includes('machine learning')) {
-      return "SELECT title, url, score, source_site FROM links WHERE (title LIKE '%AI%' OR title LIKE '%artificial intelligence%' OR title LIKE '%machine learning%' OR notes LIKE '%AI%' OR tags LIKE '%ai%') ORDER BY score DESC, extracted_at DESC;";
+      return "SELECT title, url, score, source_site, tags FROM links WHERE (title LIKE '%AI%' OR title LIKE '%artificial intelligence%' OR title LIKE '%machine learning%' OR notes LIKE '%AI%' OR tags LIKE '%ai%') ORDER BY score DESC, saved_at DESC;";
     }
     
     if (q.includes('programming') || q.includes('coding') || q.includes('development')) {
-      return "SELECT title, url, score, source_site FROM links WHERE (title LIKE '%programming%' OR title LIKE '%coding%' OR title LIKE '%development%' OR title LIKE '%developer%' OR tags LIKE '%programming%') ORDER BY score DESC, extracted_at DESC;";
+      return "SELECT title, url, score, source_site, tags FROM links WHERE (title LIKE '%programming%' OR title LIKE '%coding%' OR title LIKE '%development%' OR title LIKE '%developer%' OR tags LIKE '%programming%' OR tags LIKE '%web-dev%') ORDER BY score DESC, saved_at DESC;";
     }
     
-    if (q.includes('javascript') || q.includes('js')) {
-      return "SELECT title, url, score, source_site FROM links WHERE (title LIKE '%javascript%' OR title LIKE '%JS %' OR tags LIKE '%javascript%') ORDER BY score DESC, extracted_at DESC;";
+    if (q.includes('javascript') || q.includes('js') || q.includes('web dev')) {
+      return "SELECT title, url, score, source_site, tags FROM links WHERE (title LIKE '%javascript%' OR title LIKE '%JS %' OR tags LIKE '%javascript%' OR tags LIKE '%web-dev%') ORDER BY score DESC, saved_at DESC;";
+    }
+    
+    if (q.includes('startup') || q.includes('business')) {
+      return "SELECT title, url, score, source_site, tags FROM links WHERE (tags LIKE '%startup%' OR tags LIKE '%tech-company%' OR tags LIKE '%finance%' OR title LIKE '%startup%') ORDER BY score DESC, saved_at DESC;";
+    }
+    
+    if (q.includes('tutorial') || q.includes('how to') || q.includes('guide')) {
+      return "SELECT title, url, score, source_site, tags FROM links WHERE (tags LIKE '%tutorial%' OR title LIKE '%how to%' OR title LIKE '%guide%') ORDER BY score DESC, saved_at DESC;";
     }
     
     // Source-based queries
@@ -254,7 +262,11 @@ class SQLQueryMCPServer {
     }
     
     if (q.includes('tags') || q.includes('categories')) {
-      return "SELECT tags, COUNT(*) as count FROM links WHERE tags != '[]' AND is_curated = 1 GROUP BY tags ORDER BY count DESC;";
+      return "SELECT tags, COUNT(*) as count FROM links WHERE tags != '[]' GROUP BY tags ORDER BY count DESC LIMIT 20;";
+    }
+    
+    if (q.includes('popular tags') || q.includes('common tags')) {
+      return "SELECT tags, COUNT(*) as count, AVG(score) as avg_score FROM links WHERE tags != '[]' GROUP BY tags ORDER BY count DESC LIMIT 15;";
     }
     
     // Default: recent links

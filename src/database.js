@@ -31,7 +31,15 @@ export class Database {
   }
 
   async createTables() {
-    return new Promise((resolve, reject) => {
+    return new Promise(async (resolve, reject) => {
+      // First run migrations
+      try {
+        await this.runMigrations();
+      } catch (migrationError) {
+        console.error('Migration failed:', migrationError);
+        // Continue with table creation even if migrations fail
+      }
+
       const sql = `
         CREATE TABLE IF NOT EXISTS sites (
           id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -82,6 +90,7 @@ export class Database {
           extracted_at DATETIME DEFAULT CURRENT_TIMESTAMP,
           curated_at DATETIME,
           notes TEXT, -- personal notes about the link
+          metadata TEXT, -- JSONB metadata for analytics (comments, authors, categories, etc.)
           UNIQUE(url) -- prevent duplicate URLs
         );
       `;
@@ -255,7 +264,8 @@ export class Database {
       isCurated = false,
       isPublic = false,
       score = 0,
-      notes = null
+      notes = null,
+      metadata = null
     } = linkData;
 
     const now = new Date().toISOString();
@@ -276,7 +286,7 @@ export class Database {
             this.db.run(
               `UPDATE links SET 
                title = ?, source_site = ?, source_page = ?, description = ?, 
-               tags = ?, is_curated = ?, is_public = ?, score = ?, notes = ?, curated_at = ?
+               tags = ?, is_curated = ?, is_public = ?, score = ?, notes = ?, curated_at = ?, metadata = ?
                WHERE url = ?`,
               [
                 title,
@@ -289,6 +299,7 @@ export class Database {
                 score,
                 notes,
                 isCurated ? now : null,
+                metadata ? JSON.stringify(metadata) : null,
                 url
               ],
               function(err) {
@@ -305,8 +316,8 @@ export class Database {
             // Insert new link with saved_at
             this.db.run(
               `INSERT INTO links 
-               (title, url, source_site, source_page, description, tags, is_curated, is_public, score, notes, curated_at, saved_at)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+               (title, url, source_site, source_page, description, tags, is_curated, is_public, score, notes, curated_at, saved_at, metadata)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
               [
                 title,
                 url,
@@ -319,7 +330,8 @@ export class Database {
                 score,
                 notes,
                 isCurated ? now : null,
-                now // Set saved_at only for new records
+                now, // Set saved_at only for new records
+                metadata ? JSON.stringify(metadata) : null
               ],
               function(err) {
                 if (err) {
@@ -482,6 +494,172 @@ export class Database {
         } else {
           resolve(rows);
         }
+      });
+    });
+  }
+
+  async removeAITags() {
+    return new Promise((resolve, reject) => {
+      // Get all links with AI tags
+      this.db.all("SELECT id, tags FROM links WHERE tags LIKE '%ai%'", [], (err, rows) => {
+        if (err) {
+          reject(err);
+          return;
+        }
+
+        if (rows.length === 0) {
+          console.error('No links with AI tags found');
+          resolve(0);
+          return;
+        }
+
+        let updatedCount = 0;
+        const updates = [];
+
+        // Process each link
+        rows.forEach(row => {
+          try {
+            const tags = JSON.parse(row.tags || '[]');
+            const filteredTags = tags.filter(tag => tag !== 'ai');
+            
+            if (filteredTags.length !== tags.length) {
+              // Only update if we actually removed AI tags
+              updates.push({
+                id: row.id,
+                newTags: JSON.stringify(filteredTags)
+              });
+            }
+          } catch (parseError) {
+            console.error(`Failed to parse tags for link ${row.id}:`, parseError.message);
+          }
+        });
+
+        if (updates.length === 0) {
+          console.error('No AI tags to remove');
+          resolve(0);
+          return;
+        }
+
+        // Execute updates
+        const updatePromises = updates.map(update => {
+          return new Promise((resolveUpdate, rejectUpdate) => {
+            this.db.run(
+              "UPDATE links SET tags = ? WHERE id = ?",
+              [update.newTags, update.id],
+              function(err) {
+                if (err) {
+                  rejectUpdate(err);
+                } else {
+                  resolveUpdate();
+                }
+              }
+            );
+          });
+        });
+
+        Promise.all(updatePromises)
+          .then(() => {
+            console.error(`Successfully removed AI tags from ${updates.length} links`);
+            resolve(updates.length);
+          })
+          .catch(reject);
+      });
+    });
+  }
+
+  async deletePattern(domain, patternName) {
+    return new Promise((resolve, reject) => {
+      // First, get the site_id for the domain
+      this.db.get("SELECT id FROM sites WHERE domain = ?", [domain], (err, site) => {
+        if (err) {
+          reject(err);
+          return;
+        }
+
+        if (!site) {
+          reject(new Error(`No site found for domain: ${domain}`));
+          return;
+        }
+
+        // Delete the pattern
+        this.db.run(
+          "DELETE FROM patterns WHERE site_id = ? AND pattern_name = ?",
+          [site.id, patternName],
+          function(err) {
+            if (err) {
+              reject(err);
+            } else {
+              if (this.changes === 0) {
+                reject(new Error(`Pattern "${patternName}" not found for domain "${domain}"`));
+              } else {
+                console.error(`Deleted pattern "${patternName}" for domain "${domain}"`);
+                resolve(this.changes);
+              }
+            }
+          }
+        );
+      });
+    });
+  }
+
+  async runMigrations() {
+    return new Promise((resolve, reject) => {
+      // Check if metadata column exists
+      this.db.all("PRAGMA table_info(links)", [], (err, columns) => {
+        if (err) {
+          reject(err);
+          return;
+        }
+
+        const hasMetadata = columns.some(col => col.name === 'metadata');
+        const hasSavedAt = columns.some(col => col.name === 'saved_at');
+
+        const migrations = [];
+
+        if (!hasMetadata) {
+          migrations.push("ALTER TABLE links ADD COLUMN metadata TEXT");
+        }
+
+        if (!hasSavedAt) {
+          migrations.push("ALTER TABLE links ADD COLUMN saved_at DATETIME DEFAULT CURRENT_TIMESTAMP");
+        }
+
+        if (migrations.length === 0) {
+          resolve();
+          return;
+        }
+
+        // Run migrations sequentially
+        let completed = 0;
+        migrations.forEach((migration, index) => {
+          this.db.run(migration, (err) => {
+            if (err) {
+              console.error(`Migration ${index + 1} failed:`, err.message);
+            } else {
+              console.error(`Migration ${index + 1} completed: ${migration}`);
+            }
+            
+            completed++;
+            if (completed === migrations.length) {
+              // If we added saved_at, backfill from extracted_at
+              if (!hasSavedAt) {
+                this.db.run(
+                  "UPDATE links SET saved_at = extracted_at WHERE saved_at IS NULL",
+                  (backfillErr) => {
+                    if (backfillErr) {
+                      console.error('Backfill failed:', backfillErr.message);
+                    } else {
+                      console.error('Backfilled saved_at from extracted_at');
+                    }
+                    resolve();
+                  }
+                );
+              } else {
+                resolve();
+              }
+            }
+          });
+        });
       });
     });
   }
