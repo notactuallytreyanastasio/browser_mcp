@@ -202,8 +202,10 @@ export class RedditExtractor {
             tags.push('programming');
         if (titleLower.includes('tech') || titleLower.includes('technology'))
             tags.push('technology');
-        if (titleLower.includes('ai') || titleLower.includes('artificial intelligence'))
+        // More precise AI detection - look for word boundaries
+        if (/\b(ai|artificial intelligence|machine learning|ml|llm|gpt|chatgpt|claude|openai)\b/i.test(title)) {
             tags.push('ai');
+        }
         return tags;
     }
     formatResults(allStories, format, results) {

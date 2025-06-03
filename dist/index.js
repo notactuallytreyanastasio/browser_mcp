@@ -8,29 +8,29 @@ import { SessionManager } from './session-manager.js';
 import { RedditExtractor } from './tools/reddit-extractor.js';
 import { ArchiveManager } from './tools/archive-manager.js';
 import { LinkManager } from './tools/link-manager.js';
+import { BrowserError, DatabaseError } from './types/index.js';
 class BrowserMCPServer {
     server;
     browser = null;
     page = null;
     database;
-    commandProcessor;
-    sessionManager;
+    _commandProcessor;
+    _sessionManager;
     redditExtractor;
     archiveManager;
     linkManager;
     constructor() {
-        const config = {
+        this.server = new Server({
             name: 'browser-mcp-server',
             version: '1.0.0',
-        };
-        this.server = new Server(config, {
+        }, {
             capabilities: {
                 tools: {},
             },
         });
         this.database = new Database();
-        this.commandProcessor = new CommandProcessor(this);
-        this.sessionManager = new SessionManager();
+        this._commandProcessor = new CommandProcessor(this);
+        this._sessionManager = new SessionManager();
         // Initialize tool managers
         this.redditExtractor = new RedditExtractor(this.browser, this.database);
         this.archiveManager = new ArchiveManager(this.database);
@@ -185,6 +185,9 @@ class BrowserMCPServer {
         }));
         this.server.setRequestHandler(CallToolRequestSchema, async (request) => {
             const { name, arguments: args } = request.params;
+            if (!args) {
+                throw new Error('Missing arguments for tool call');
+            }
             try {
                 switch (name) {
                     case 'open_browser':
